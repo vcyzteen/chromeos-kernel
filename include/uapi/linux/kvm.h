@@ -838,6 +838,7 @@ struct kvm_ppc_smmu_info {
 #define KVM_CAP_GUEST_DEBUG_HW_WPS 120
 #define KVM_CAP_SPLIT_IRQCHIP 121
 #define KVM_CAP_IOEVENTFD_ANY_LENGTH 122
+#define KVM_CAP_HYPERV_SYNIC 123
 #define KVM_CAP_IMMEDIATE_EXIT 136
 #define KVM_CAP_S390_BPB 152
 #define KVM_CAP_COALESCED_PIO 162
@@ -864,10 +865,16 @@ struct kvm_irq_routing_s390_adapter {
 	__u32 adapter_id;
 };
 
+struct kvm_irq_routing_hv_sint {
+	__u32 vcpu;
+	__u32 sint;
+};
+
 /* gsi routing entry types */
 #define KVM_IRQ_ROUTING_IRQCHIP 1
 #define KVM_IRQ_ROUTING_MSI 2
 #define KVM_IRQ_ROUTING_S390_ADAPTER 3
+#define KVM_IRQ_ROUTING_HV_SINT 4
 
 struct kvm_irq_routing_entry {
 	__u32 gsi;
@@ -878,6 +885,7 @@ struct kvm_irq_routing_entry {
 		struct kvm_irq_routing_irqchip irqchip;
 		struct kvm_irq_routing_msi msi;
 		struct kvm_irq_routing_s390_adapter adapter;
+		struct kvm_irq_routing_hv_sint hv_sint;
 		__u32 pad[8];
 	} u;
 };
