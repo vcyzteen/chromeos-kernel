@@ -30,6 +30,7 @@
 #include <linux/media.h>
 
 struct media_pipeline {
+	int streaming_count;
 };
 
 struct media_link {

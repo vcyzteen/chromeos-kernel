@@ -268,6 +268,7 @@ __must_check int media_entity_pipeline_start(struct media_entity *entity,
 
 	mutex_lock(&mdev->graph_mutex);
 
+	pipe->streaming_count++;
 	media_entity_graph_walk_start(&graph, entity);
 
 	while ((entity = media_entity_graph_walk_next(&graph))) {
@@ -363,6 +364,7 @@ error:
 			break;
 	}
 
+	pipe->streaming_count--;
 	mutex_unlock(&mdev->graph_mutex);
 
 	return ret;
@@ -385,9 +387,11 @@ void media_entity_pipeline_stop(struct media_entity *entity)
 {
 	struct media_device *mdev = entity->parent;
 	struct media_entity_graph graph;
+	struct media_pipeline *pipe = entity->pipe;
 
 	mutex_lock(&mdev->graph_mutex);
 
+	WARN_ON(!pipe->streaming_count);
 	media_entity_graph_walk_start(&graph, entity);
 
 	while ((entity = media_entity_graph_walk_next(&graph))) {
@@ -396,6 +400,7 @@ void media_entity_pipeline_stop(struct media_entity *entity)
 			entity->pipe = NULL;
 	}
 
+	pipe->streaming_count--;
 	mutex_unlock(&mdev->graph_mutex);
 }
 EXPORT_SYMBOL_GPL(media_entity_pipeline_stop);
