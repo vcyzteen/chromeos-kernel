@@ -4598,11 +4598,9 @@ int i915_gem_init_hw(struct drm_i915_private *dev_priv)
 	intel_mocs_init_l3cc_table(dev_priv);
 
 	/* We can't enable contexts until all firmware is loaded */
-	if (HAS_GUC(dev_priv)) {
-		ret = intel_guc_setup(dev_priv);
-		if (ret)
-			goto out;
-	}
+	ret = intel_guc_setup(dev_priv);
+	if (ret)
+		goto out;
 
 out:
 	intel_uncore_forcewake_put(dev_priv, FORCEWAKE_ALL);
