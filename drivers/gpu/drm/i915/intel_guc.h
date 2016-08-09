@@ -67,6 +67,8 @@ struct i915_guc_client {
 	void *vaddr;
 	struct i915_gem_context *owner;
 	struct intel_guc *guc;
+
+	uint32_t engines;		/* bitmap of (host) engine ids	*/
 	uint32_t priority;
 	uint32_t ctx_index;
 
@@ -80,7 +82,6 @@ struct i915_guc_client {
 	uint32_t wq_offset;
 	uint32_t wq_size;
 	uint32_t wq_tail;
-	uint32_t unused;		/* Was 'wq_head'		*/
 
 	uint32_t wq_rsvd;
 	uint32_t no_wq_space;

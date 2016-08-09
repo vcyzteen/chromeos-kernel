@@ -360,10 +360,10 @@ static void guc_ctx_desc_init(struct intel_guc *guc,
 {
 	struct drm_i915_private *dev_priv = guc_to_i915(guc);
 	struct intel_engine_cs *engine;
-	enum intel_engine_id id;
 	struct i915_gem_context *ctx = client->owner;
 	struct guc_context_desc desc;
 	struct sg_table *sg;
+	unsigned int tmp;
 	u32 gfx_addr;
 
 	memset(&desc, 0, sizeof(desc));
@@ -373,7 +373,7 @@ static void guc_ctx_desc_init(struct intel_guc *guc,
 	desc.priority = client->priority;
 	desc.db_id = client->doorbell_id;
 
-	for_each_engine(engine, dev_priv, id) {
+	for_each_engine_masked(engine, dev_priv, client->engines, tmp) {
 		struct intel_context *ce = &ctx->engine[engine->id];
 		uint32_t guc_engine_id = engine->guc_id;
 		struct guc_execlist_context *lrc = &desc.lrc[guc_engine_id];
@@ -404,6 +404,8 @@ static void guc_ctx_desc_init(struct intel_guc *guc,
 		desc.engines_used |= (1 << guc_engine_id);
 	}
 
+	DRM_DEBUG_DRIVER("Host engines 0x%x => GuC engines used 0x%x\n",
+			client->engines, desc.engines_used);
 	WARN_ON(desc.engines_used == 0);
 
 	/*
@@ -791,6 +793,7 @@ static void guc_init_doorbell_hw(struct intel_guc *guc)
  */
 static struct i915_guc_client *
 guc_client_alloc(struct drm_i915_private *dev_priv,
+		 uint32_t engines,
 		 uint32_t priority,
 		 struct i915_gem_context *ctx)
 {
@@ -804,10 +807,11 @@ guc_client_alloc(struct drm_i915_private *dev_priv,
 	if (!client)
 		return NULL;
 
-	client->doorbell_id = GUC_INVALID_DOORBELL_ID;
-	client->priority = priority;
 	client->owner = ctx;
 	client->guc = guc;
+	client->engines = engines;
+	client->priority = priority;
+	client->doorbell_id = GUC_INVALID_DOORBELL_ID;
 
 	client->ctx_index = (uint32_t)ida_simple_get(&guc->ctx_ids, 0,
 			GUC_MAX_GPU_CONTEXTS, GFP_KERNEL);
@@ -856,8 +860,8 @@ guc_client_alloc(struct drm_i915_private *dev_priv,
 	if (guc_init_doorbell(guc, client, db_id))
 		goto err;
 
-	DRM_DEBUG_DRIVER("new priority %u client %p: ctx_index %u\n",
-		priority, client, client->ctx_index);
+	DRM_DEBUG_DRIVER("new priority %u client %p for engine(s) 0x%x: ctx_index %u\n",
+		priority, client, client->engines, client->ctx_index);
 	DRM_DEBUG_DRIVER("doorbell id %u, cacheline offset 0x%x\n",
 		client->doorbell_id, client->doorbell_offset);
 
@@ -1395,6 +1399,7 @@ int i915_guc_submission_enable(struct drm_i915_private *dev_priv)
 
 	/* client for execbuf submission */
 	client = guc_client_alloc(dev_priv,
+				  INTEL_INFO(dev_priv)->ring_mask,
 				  GUC_CTX_PRIORITY_KMD_NORMAL,
 				  dev_priv->kernel_context);
 	if (!client) {
