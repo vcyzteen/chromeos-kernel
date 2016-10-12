@@ -2502,6 +2502,44 @@ static int i915_guc_log_dump(struct seq_file *m, void *data)
 	return 0;
 }
 
+static int i915_guc_log_control_get(void *data, u64 *val)
+{
+	struct drm_device *dev = data;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+
+	if (!dev_priv->guc.log.vma)
+		return -EINVAL;
+
+	*val = i915.guc_log_level;
+
+	return 0;
+}
+
+static int i915_guc_log_control_set(void *data, u64 val)
+{
+	struct drm_device *dev = data;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	int ret;
+
+	if (!dev_priv->guc.log.vma)
+		return -EINVAL;
+
+	ret = mutex_lock_interruptible(&dev->struct_mutex);
+	if (ret)
+		return ret;
+
+	intel_runtime_pm_get(dev_priv);
+	ret = i915_guc_log_control(dev_priv, val);
+	intel_runtime_pm_put(dev_priv);
+
+	mutex_unlock(&dev->struct_mutex);
+	return ret;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(i915_guc_log_control_fops,
+			i915_guc_log_control_get, i915_guc_log_control_set,
+			"%lld\n");
+
 static int i915_psr_sink_status_show(struct seq_file *m, void *data)
 {
 	u8 val;
@@ -4706,7 +4744,8 @@ static const struct i915_debugfs_files {
 	{"i915_fbc_false_color", &i915_fbc_fc_fops},
 	{"i915_dp_test_data", &i915_displayport_test_data_fops},
 	{"i915_dp_test_type", &i915_displayport_test_type_fops},
-	{"i915_edp_psr_debug", &i915_edp_psr_debug_fops}
+	{"i915_edp_psr_debug", &i915_edp_psr_debug_fops},
+	{"i915_guc_log_control", &i915_guc_log_control_fops}
 };
 
 int i915_debugfs_register(struct drm_i915_private *dev_priv)
