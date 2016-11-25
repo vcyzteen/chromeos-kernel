@@ -827,6 +827,7 @@ static int i915_driver_init_early(struct drm_i915_private *dev_priv,
 	if (ret)
 		return ret;
 
+	intel_uc_init_early(dev_priv);
 	i915_memcpy_init_early(dev_priv);
 
 	ret = i915_workqueues_init(dev_priv);
