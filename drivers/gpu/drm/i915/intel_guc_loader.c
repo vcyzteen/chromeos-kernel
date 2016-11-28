@@ -562,7 +562,7 @@ void intel_uc_fw_fetch(struct drm_i915_private *dev_priv,
 {
 	struct pci_dev *pdev = dev_priv->drm.pdev;
 	struct drm_i915_gem_object *obj;
-	const struct firmware *fw;
+	const struct firmware *fw = NULL;
 	struct guc_css_header *css;
 	size_t size;
 	int err;

@@ -391,7 +391,7 @@ static void csr_load_work_fn(struct work_struct *work)
 	static const unsigned rootfs_timeout_ms = 60 * 1000;
 	struct drm_i915_private *dev_priv;
 	struct intel_csr *csr;
-	const struct firmware *fw;
+	const struct firmware *fw = NULL;
 	int ret;
 
 	dev_priv = container_of(work, typeof(*dev_priv), csr.work);
