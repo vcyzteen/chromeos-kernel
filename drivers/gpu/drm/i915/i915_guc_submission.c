@@ -489,11 +489,8 @@ static int guc_ring_doorbell(struct i915_guc_client *client)
 }
 
 /**
- * i915_guc_submit() - Submit commands through GuC
+ * __i915_guc_submit() - Submit commands through GuC
  * @rq:		request associated with the commands
- *
- * Return:	0 on success, otherwise an errno.
- * 		(Note: nonzero really shouldn't happen!)
  *
  * The caller must have already called i915_guc_wq_reserve() above with
  * a result of 0 (success), guaranteeing that there is space in the work
@@ -506,15 +503,13 @@ static int guc_ring_doorbell(struct i915_guc_client *client)
  * The only error here arises if the doorbell hardware isn't functioning
  * as expected, which really shouln't happen.
  */
-static void i915_guc_submit(struct drm_i915_gem_request *rq)
+static void __i915_guc_submit(struct drm_i915_gem_request *rq)
 {
 	struct intel_engine_cs *engine = rq->engine;
 	unsigned int engine_id = engine->id;
 	struct intel_guc *guc = &rq->i915->guc;
 	struct i915_guc_client *client = guc->execbuf_client;
 	int b_ret;
-
-	i915_gem_request_submit(rq);
 
 	spin_lock(&client->wq_lock);
 	guc_wq_item_append(client, rq);
@@ -528,6 +523,12 @@ static void i915_guc_submit(struct drm_i915_gem_request *rq)
 	guc->submissions[engine_id] += 1;
 	guc->last_seqno[engine_id] = rq->global_seqno;
 	spin_unlock(&client->wq_lock);
+}
+
+static void i915_guc_submit(struct drm_i915_gem_request *rq)
+{
+	i915_gem_request_submit(rq);
+	__i915_guc_submit(rq);
 }
 
 /*
@@ -944,7 +945,7 @@ int i915_guc_submission_enable(struct drm_i915_private *dev_priv)
 		/* Replay the current set of previously submitted requests */
 		list_for_each_entry(rq, &engine->timeline->requests, link) {
 			client->wq_rsvd += sizeof(struct guc_wq_item);
-			i915_guc_submit(rq);
+			__i915_guc_submit(rq);
 		}
 	}
 
