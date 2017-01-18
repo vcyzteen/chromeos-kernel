@@ -373,6 +373,7 @@ typedef struct drm_i915_irq_wait {
  * priorities and the driver will attempt to execute batches in priority order.
  */
 #define I915_PARAM_HAS_SCHEDULER	 41
+#define I915_PARAM_HUC_STATUS		 42
 
 /* Query whether DRM_I915_GEM_EXECBUFFER2 supports the ability to opt-out of
  * synchronisation with implicit fencing on individual objects.
