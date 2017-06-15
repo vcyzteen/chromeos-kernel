@@ -24,6 +24,7 @@
 #define _MEDIA_ENTITY_H
 
 #include <linux/bitops.h>
+#include <linux/fwnode.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/media.h>
@@ -46,6 +47,9 @@ struct media_pad {
 
 /**
  * struct media_entity_operations - Media entity operations
+ * @get_fwnode_pad:	Return the pad number based on a fwnode endpoint or
+ *			a negative value on error. This operation can be used
+ *			to map a fwnode to a media pad number. Optional.
  * @link_setup:		Notify the entity of link changes. The operation can
  *			return an error, in which case link setup will be
  *			cancelled. Optional.
@@ -54,6 +58,7 @@ struct media_pad {
  *			validates all links by calling this operation. Optional.
  */
 struct media_entity_operations {
+	int (*get_fwnode_pad)(struct fwnode_endpoint *endpoint);
 	int (*link_setup)(struct media_entity *entity,
 			  const struct media_pad *local,
 			  const struct media_pad *remote, u32 flags);
