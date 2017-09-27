@@ -2270,9 +2270,9 @@ static int isp_fwnodes_parse(struct device *dev,
 		if (isp_fwnode_parse(dev, fwnode, isd))
 			goto error;
 
-		isd->asd.match.fwnode.fwnode =
+		isd->asd.match.fwnode =
 			fwnode_graph_get_remote_port_parent(fwnode);
-		if (!isd->asd.match.fwnode.fwnode) {
+		if (!isd->asd.match.fwnode) {
 			dev_warn(dev, "bad remote port parent\n");
 			goto error;
 		}
