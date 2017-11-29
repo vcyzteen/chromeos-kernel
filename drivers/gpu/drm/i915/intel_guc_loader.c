@@ -60,7 +60,7 @@
 #define BXT_FW_MINOR 7
 
 #define KBL_FW_MAJOR 9
-#define KBL_FW_MINOR 14
+#define KBL_FW_MINOR 39
 
 #define GUC_FW_PATH(platform, major, minor) \
        "i915/" __stringify(platform) "_guc_ver" __stringify(major) "_" __stringify(minor) ".bin"
