@@ -5051,7 +5051,7 @@ static int skl_update_scaler_plane(struct intel_crtc_state *crtc_state,
 		return ret;
 
 	/* check colorkey */
-	if (plane_state->ckey.flags != I915_SET_COLORKEY_NONE) {
+	if (plane_state->ckey.flags) {
 		DRM_DEBUG_KMS("[PLANE:%d:%s] scaling with color key not allowed",
 			      intel_plane->base.base.id,
 			      intel_plane->base.name);
@@ -13267,7 +13267,7 @@ intel_check_primary_plane(struct drm_plane *plane,
 
 	if (INTEL_GEN(dev_priv) >= 9) {
 		/* use scaler when colorkey is not required */
-		if (state->ckey.flags == I915_SET_COLORKEY_NONE) {
+		if (!state->ckey.flags) {
 			min_scale = 1;
 			if (state->base.fb)
 				pixel_format = state->base.fb->format->format;
