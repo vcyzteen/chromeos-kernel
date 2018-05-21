@@ -292,15 +292,38 @@ skl_update_plane(struct drm_plane *drm_plane,
 	if (plane_state->scaler_id >= 0) {
 		int scaler_id = plane_state->scaler_id;
 		const struct intel_scaler *scaler;
+		u16 y_hphase, uv_rgb_hphase;
+		u16 y_vphase, uv_rgb_vphase;
 
 		DRM_DEBUG_KMS("plane = %d PS_PLANE_SEL(plane) = 0x%x\n",
 			      plane_id, PS_PLANE_SEL(plane_id));
 
 		scaler = &crtc_state->scaler_state.scalers[scaler_id];
 
+		/* TODO: handle sub-pixel coordinates */
+		if (fb->format->format == DRM_FORMAT_NV12) {
+			y_hphase = skl_scaler_calc_phase(1, false);
+			y_vphase = skl_scaler_calc_phase(1, false);
+
+			/* MPEG2 chroma siting convention */
+			uv_rgb_hphase = skl_scaler_calc_phase(2, true);
+			uv_rgb_vphase = skl_scaler_calc_phase(2, false);
+		} else {
+			/* not used */
+			y_hphase = 0;
+			y_vphase = 0;
+
+			uv_rgb_hphase = skl_scaler_calc_phase(1, false);
+			uv_rgb_vphase = skl_scaler_calc_phase(1, false);
+		}
+
 		I915_WRITE(SKL_PS_CTRL(pipe, scaler_id),
 			   PS_SCALER_EN | PS_PLANE_SEL(plane_id) | scaler->mode);
 		I915_WRITE(SKL_PS_PWR_GATE(pipe, scaler_id), 0);
+		I915_WRITE(SKL_PS_VPHASE(pipe, scaler_id),
+			   PS_Y_PHASE(y_vphase) | PS_UV_RGB_PHASE(uv_rgb_vphase));
+		I915_WRITE(SKL_PS_HPHASE(pipe, scaler_id),
+			   PS_Y_PHASE(y_hphase) | PS_UV_RGB_PHASE(uv_rgb_hphase));
 		I915_WRITE(SKL_PS_WIN_POS(pipe, scaler_id), (crtc_x << 16) | crtc_y);
 		I915_WRITE(SKL_PS_WIN_SZ(pipe, scaler_id),
 			((crtc_w + 1) << 16)|(crtc_h + 1));

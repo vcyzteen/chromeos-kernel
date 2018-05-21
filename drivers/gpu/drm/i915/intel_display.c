@@ -3703,12 +3703,35 @@ static void skylake_update_primary_plane(struct drm_plane *plane,
 
 	if (scaler_id >= 0) {
 		uint32_t ps_ctrl = 0;
+		u16 y_hphase, uv_rgb_hphase;
+		u16 y_vphase, uv_rgb_vphase;
+
+		/* TODO: handle sub-pixel coordinates */
+		if (fb->format->format == DRM_FORMAT_NV12) {
+			y_hphase = skl_scaler_calc_phase(1, false);
+			y_vphase = skl_scaler_calc_phase(1, false);
+
+			/* MPEG2 chroma siting convention */
+			uv_rgb_hphase = skl_scaler_calc_phase(2, true);
+			uv_rgb_vphase = skl_scaler_calc_phase(2, false);
+		} else {
+			/* not used */
+			y_hphase = 0;
+			y_vphase = 0;
+
+			uv_rgb_hphase = skl_scaler_calc_phase(1, false);
+			uv_rgb_vphase = skl_scaler_calc_phase(1, false);
+		}
 
 		WARN_ON(!dst_w || !dst_h);
 		ps_ctrl = PS_SCALER_EN | PS_PLANE_SEL(plane_id) |
 			crtc_state->scaler_state.scalers[scaler_id].mode;
 		I915_WRITE(SKL_PS_CTRL(pipe, scaler_id), ps_ctrl);
 		I915_WRITE(SKL_PS_PWR_GATE(pipe, scaler_id), 0);
+		I915_WRITE(SKL_PS_VPHASE(pipe, scaler_id),
+			   PS_Y_PHASE(y_vphase) | PS_UV_RGB_PHASE(uv_rgb_vphase));
+		I915_WRITE(SKL_PS_HPHASE(pipe, scaler_id),
+			   PS_Y_PHASE(y_hphase) | PS_UV_RGB_PHASE(uv_rgb_hphase));
 		I915_WRITE(SKL_PS_WIN_POS(pipe, scaler_id), (dst_x << 16) | dst_y);
 		I915_WRITE(SKL_PS_WIN_SZ(pipe, scaler_id), (dst_w << 16) | dst_h);
 		I915_WRITE(PLANE_POS(pipe, plane_id), 0);
@@ -4921,6 +4944,39 @@ static void cpt_verify_modeset(struct drm_device *dev, int pipe)
 	}
 }
 
+/*
+ * The hardware phase 0.0 refers to the center of the pixel.
+ * We want to start from the top/left edge which is phase
+ * -0.5. That matches how the hardware calculates the scaling
+ * factors (from top-left of the first pixel to bottom-right
+ * of the last pixel, as opposed to the pixel centers).
+ *
+ * For 4:2:0 subsampled chroma planes we obviously have to
+ * adjust that so that the chroma sample position lands in
+ * the right spot.
+ *
+ * Note that for packed YCbCr 4:2:2 formats there is no way to
+ * control chroma siting. The hardware simply replicates the
+ * chroma samples for both of the luma samples, and thus we don't
+ * actually get the expected MPEG2 chroma siting convention :(
+ * The same behaviour is observed on pre-SKL platforms as well.
+ */
+u16 skl_scaler_calc_phase(int sub, bool chroma_cosited)
+{
+	int phase = -0x8000;
+	u16 trip = 0;
+
+	if (chroma_cosited)
+		phase += (sub - 1) * 0x8000 / sub;
+
+	if (phase < 0)
+		phase = 0x10000 + phase;
+	else
+		trip = PS_PHASE_TRIP;
+
+	return ((phase >> 2) & PS_PHASE_MASK) | trip;
+}
+
 static int
 skl_update_scaler(struct intel_crtc_state *crtc_state, bool force_detach,
 		  unsigned scaler_user, int *scaler_id, unsigned int rotation,
@@ -5100,6 +5156,7 @@ static void skylake_pfit_enable(struct intel_crtc *crtc)
 	DRM_DEBUG_KMS("for crtc_state = %p\n", crtc->config);
 
 	if (crtc->config->pch_pfit.enabled) {
+		u16 uv_rgb_hphase, uv_rgb_vphase;
 		int id;
 
 		if (WARN_ON(crtc->config->scaler_state.scaler_id < 0)) {
@@ -5107,9 +5164,16 @@ static void skylake_pfit_enable(struct intel_crtc *crtc)
 			return;
 		}
 
+		uv_rgb_hphase = skl_scaler_calc_phase(1, false);
+		uv_rgb_vphase = skl_scaler_calc_phase(1, false);
+
 		id = scaler_state->scaler_id;
 		I915_WRITE(SKL_PS_CTRL(pipe, id), PS_SCALER_EN |
 			PS_FILTER_MEDIUM | scaler_state->scalers[id].mode);
+		I915_WRITE(SKL_PS_VPHASE(pipe, id),
+			   PS_Y_PHASE(0) | PS_UV_RGB_PHASE(uv_rgb_vphase));
+		I915_WRITE(SKL_PS_HPHASE(pipe, id),
+			   PS_Y_PHASE(0) | PS_UV_RGB_PHASE(uv_rgb_hphase));
 		I915_WRITE(SKL_PS_WIN_POS(pipe, id), crtc->config->pch_pfit.pos);
 		I915_WRITE(SKL_PS_WIN_SZ(pipe, id), crtc->config->pch_pfit.size);
 
