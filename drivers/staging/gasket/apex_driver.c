@@ -26,7 +26,7 @@
 
 /* Constants */
 #define APEX_DEVICE_NAME "Apex"
-#define APEX_DRIVER_VERSION "1.0"
+#define APEX_DRIVER_VERSION "1.1"
 
 /* CSRs are in BAR 2. */
 #define APEX_BAR_INDEX 2
@@ -521,6 +521,62 @@ static long apex_clock_gating(struct gasket_dev *gasket_dev,
 	return 0;
 }
 
+/* apex_set_performance_expectation: Adjust clock rates for Apex. */
+static long apex_set_performance_expectation(
+	struct gasket_dev *gasket_dev,
+	struct apex_performance_expectation_ioctl __user *argp)
+{
+	struct apex_performance_expectation_ioctl ibuf;
+	u32 rg_gcb_clk_div = 0;
+	const int AXI_CLK_125M_SHIFT = 2;
+	const int MCU_CLK_250M_SHIFT = 3;
+
+	/* 8051 clock is always 250 MHz for PCIe, not used. */
+	const u32 rg_8051_clk_250m = 1;
+        /* Use 250 MHz for AXI clock always. */
+	const u32 rg_axi_clk_125m = 0;
+
+	if (bypass_top_level)
+		return 0;
+
+	if (copy_from_user(&ibuf, argp, sizeof(ibuf)))
+		return -EFAULT;
+
+	switch (ibuf.performance) {
+	case APEX_PERFORMANCE_LOW:
+		/* - GCB clock: 62.5 MHz */
+		rg_gcb_clk_div = 3;
+		break;
+
+	case APEX_PERFORMANCE_MED:
+		/* - GCB clock: 125 MHz */
+		rg_gcb_clk_div = 2;
+		break;
+
+	case APEX_PERFORMANCE_HIGH:
+		/* - GCB clock: 250 MHz */
+		rg_gcb_clk_div = 1;
+		break;
+
+	case APEX_PERFORMANCE_MAX:
+		/* - GCB clock: 500 MHz */
+		rg_gcb_clk_div = 0;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	/* Set clock rates for GCB, AXI, and 8051 */
+	gasket_read_modify_write_32(
+		gasket_dev, APEX_BAR_INDEX, APEX_BAR2_REG_SCU_3,
+		(rg_gcb_clk_div | (rg_axi_clk_125m << AXI_CLK_125M_SHIFT) |
+		(rg_8051_clk_250m << MCU_CLK_250M_SHIFT)),
+		/*mask_width=*/ 4, /*mask_shift=*/ 28);
+
+	return 0;
+}
+
 /* Apex-specific ioctl handler. */
 static long apex_ioctl(struct file *filp, uint cmd, void __user *argp)
 {
@@ -532,6 +588,8 @@ static long apex_ioctl(struct file *filp, uint cmd, void __user *argp)
 	switch (cmd) {
 	case APEX_IOCTL_GATE_CLOCK:
 		return apex_clock_gating(gasket_dev, argp);
+	case APEX_IOCTL_PERFORMANCE_EXPECTATION:
+		return apex_set_performance_expectation(gasket_dev, argp);
 	default:
 		return -ENOTTY; /* unknown command */
 	}
