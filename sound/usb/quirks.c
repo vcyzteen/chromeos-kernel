@@ -1188,7 +1188,7 @@ int snd_usb_select_mode_quirk(struct snd_usb_substream *subs,
 		if (err < 0)
 			return err;
 
-		mdelay(20); /* Delay needed after setting the interface */
+		msleep(20); /* Delay needed after setting the interface */
 
 		switch (fmt->altsetting) {
 		case 2: /* DSD mode requested */
@@ -1200,7 +1200,7 @@ int snd_usb_select_mode_quirk(struct snd_usb_substream *subs,
 				return err;
 			break;
 		}
-		mdelay(20);
+		msleep(20);
 	}
 	return 0;
 }
@@ -1237,7 +1237,7 @@ void snd_usb_set_interface_quirk(struct usb_device *dev)
 	switch (le16_to_cpu(dev->descriptor.idVendor)) {
 	case 0x23ba: /* Playback Design */
 	case 0x0644: /* TEAC Corp. */
-		mdelay(50);
+		msleep(50);
 		break;
 	}
 }
@@ -1252,7 +1252,7 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	 */
 	if ((le16_to_cpu(dev->descriptor.idVendor) == 0x23ba) &&
 	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
-		mdelay(20);
+		msleep(20);
 
 	/*
 	 * "TEAC Corp." products need a 20ms delay after each
@@ -1260,7 +1260,7 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	 */
 	if ((le16_to_cpu(dev->descriptor.idVendor) == 0x0644) &&
 	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
-		mdelay(20);
+		msleep(20);
 
 	/* Marantz/Denon devices with USB DAC functionality need a delay
 	 * after each class compliant request
@@ -1268,7 +1268,7 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	if (is_marantz_denon_dac(USB_ID(le16_to_cpu(dev->descriptor.idVendor),
 					le16_to_cpu(dev->descriptor.idProduct)))
 	    && (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
-		mdelay(20);
+		msleep(20);
 
 	/* Zoom R16/24 needs a tiny delay here, otherwise requests like
 	 * get/set frequency return as failed despite actually succeeding.
@@ -1276,7 +1276,7 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	if ((le16_to_cpu(dev->descriptor.idVendor) == 0x1686) &&
 	    (le16_to_cpu(dev->descriptor.idProduct) == 0x00dd) &&
 	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
-		mdelay(1);
+		usleep_range(1000, 2000);
 }
 
 /*
