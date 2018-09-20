@@ -158,6 +158,7 @@ struct spi_device {
 	void			*controller_state;
 	void			*controller_data;
 	char			modalias[SPI_NAME_SIZE];
+	const char		*driver_override;
 	int			cs_gpio;	/* chip select gpio */
 
 	/* the statistics */
