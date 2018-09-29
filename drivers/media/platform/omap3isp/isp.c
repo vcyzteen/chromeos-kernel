@@ -2368,6 +2368,7 @@ static int isp_probe(struct platform_device *pdev)
 
 	mutex_init(&isp->isp_mutex);
 	spin_lock_init(&isp->stat_lock);
+	v4l2_async_notifier_init(&isp->notifier);
 
 	isp->dev = &pdev->dev;
 	isp->ref_count = 0;
