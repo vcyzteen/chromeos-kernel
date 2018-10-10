@@ -4485,6 +4485,10 @@ int ieee80211_mgd_auth(struct ieee80211_sub_if_data *sdata,
 		return -EOPNOTSUPP;
 	}
 
+	if ((ifmgd->auth_data && !ifmgd->auth_data->done) ||
+	    ifmgd->assoc_data)
+		return -EBUSY;
+
 	auth_data = kzalloc(sizeof(*auth_data) + req->sae_data_len +
 			    req->ie_len, GFP_KERNEL);
 	if (!auth_data)
@@ -4516,12 +4520,6 @@ int ieee80211_mgd_auth(struct ieee80211_sub_if_data *sdata,
 	auth_data->algorithm = auth_alg;
 
 	/* try to authenticate/probe */
-
-	if ((ifmgd->auth_data && !ifmgd->auth_data->done) ||
-	    ifmgd->assoc_data) {
-		err = -EBUSY;
-		goto err_free;
-	}
 
 	if (ifmgd->auth_data)
 		ieee80211_destroy_auth_data(sdata, false);
@@ -4567,7 +4565,6 @@ int ieee80211_mgd_auth(struct ieee80211_sub_if_data *sdata,
 	mutex_lock(&sdata->local->mtx);
 	ieee80211_vif_release_channel(sdata);
 	mutex_unlock(&sdata->local->mtx);
- err_free:
 	kfree(auth_data);
 	return err;
 }
