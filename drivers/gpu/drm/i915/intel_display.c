@@ -3705,22 +3705,30 @@ static void skylake_update_primary_plane(struct drm_plane *plane,
 		uint32_t ps_ctrl = 0;
 		u16 y_hphase, uv_rgb_hphase;
 		u16 y_vphase, uv_rgb_vphase;
+		int hscale, vscale;
+
+		hscale = drm_rect_calc_hscale(&plane_state->base.src,
+					      &plane_state->base.dst,
+					      0, INT_MAX);
+		vscale = drm_rect_calc_vscale(&plane_state->base.src,
+					      &plane_state->base.dst,
+					      0, INT_MAX);
 
 		/* TODO: handle sub-pixel coordinates */
 		if (fb->format->format == DRM_FORMAT_NV12) {
-			y_hphase = skl_scaler_calc_phase(1, false);
-			y_vphase = skl_scaler_calc_phase(1, false);
+			y_hphase = skl_scaler_calc_phase(1, hscale, false);
+			y_vphase = skl_scaler_calc_phase(1, vscale, false);
 
 			/* MPEG2 chroma siting convention */
-			uv_rgb_hphase = skl_scaler_calc_phase(2, true);
-			uv_rgb_vphase = skl_scaler_calc_phase(2, false);
+			uv_rgb_hphase = skl_scaler_calc_phase(2, hscale, true);
+			uv_rgb_vphase = skl_scaler_calc_phase(2, vscale, false);
 		} else {
 			/* not used */
 			y_hphase = 0;
 			y_vphase = 0;
 
-			uv_rgb_hphase = skl_scaler_calc_phase(1, false);
-			uv_rgb_vphase = skl_scaler_calc_phase(1, false);
+			uv_rgb_hphase = skl_scaler_calc_phase(1, hscale, false);
+			uv_rgb_vphase = skl_scaler_calc_phase(1, vscale, false);
 		}
 
 		WARN_ON(!dst_w || !dst_h);
@@ -4960,14 +4968,46 @@ static void cpt_verify_modeset(struct drm_device *dev, int pipe)
  * chroma samples for both of the luma samples, and thus we don't
  * actually get the expected MPEG2 chroma siting convention :(
  * The same behaviour is observed on pre-SKL platforms as well.
+ *
+ * Theory behind the formula (note that we ignore sub-pixel
+ * source coordinates):
+ * s = source sample position
+ * d = destination sample position
+ *
+ * Downscaling 4:1:
+ * -0.5
+ * | 0.0
+ * | |     1.5 (initial phase)
+ * | |     |
+ * v v     v
+ * | s | s | s | s |
+ * |       d       |
+ *
+ * Upscaling 1:4:
+ * -0.5
+ * | -0.375 (initial phase)
+ * | |     0.0
+ * | |     |
+ * v v     v
+ * |       s       |
+ * | d | d | d | d |
  */
-u16 skl_scaler_calc_phase(int sub, bool chroma_cosited)
+u16 skl_scaler_calc_phase(int sub, int scale, bool chroma_cosited)
 {
 	int phase = -0x8000;
 	u16 trip = 0;
 
 	if (chroma_cosited)
 		phase += (sub - 1) * 0x8000 / sub;
+
+	phase += scale / (2 * sub);
+
+	/*
+	 * Hardware initial phase limited to [-0.5:1.5].
+	 * Since the max hardware scale factor is 3.0, we
+	 * should never actually excdeed 1.0 here.
+	 */
+	WARN_ON(phase < -0x8000 || phase > 0x18000);
 
 	if (phase < 0)
 		phase = 0x10000 + phase;
@@ -5150,6 +5190,7 @@ static void skylake_pfit_enable(struct intel_crtc *crtc)
 	struct drm_device *dev = crtc->base.dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	int pipe = crtc->pipe;
+	const struct intel_crtc_state *crtc_state = crtc->config;
 	struct intel_crtc_scaler_state *scaler_state =
 		&crtc->config->scaler_state;
 
@@ -5157,6 +5198,7 @@ static void skylake_pfit_enable(struct intel_crtc *crtc)
 
 	if (crtc->config->pch_pfit.enabled) {
 		u16 uv_rgb_hphase, uv_rgb_vphase;
+		int pfit_w, pfit_h, hscale, vscale;
 		int id;
 
 		if (WARN_ON(crtc->config->scaler_state.scaler_id < 0)) {
@@ -5164,8 +5206,14 @@ static void skylake_pfit_enable(struct intel_crtc *crtc)
 			return;
 		}
 
-		uv_rgb_hphase = skl_scaler_calc_phase(1, false);
-		uv_rgb_vphase = skl_scaler_calc_phase(1, false);
+		pfit_w = (crtc_state->pch_pfit.size >> 16) & 0xFFFF;
+		pfit_h = crtc_state->pch_pfit.size & 0xFFFF;
+
+		hscale = (crtc_state->pipe_src_w << 16) / pfit_w;
+		vscale = (crtc_state->pipe_src_h << 16) / pfit_h;
+
+		uv_rgb_hphase = skl_scaler_calc_phase(1, hscale, false);
+		uv_rgb_vphase = skl_scaler_calc_phase(1, vscale, false);
 
 		id = scaler_state->scaler_id;
 		I915_WRITE(SKL_PS_CTRL(pipe, id), PS_SCALER_EN |
