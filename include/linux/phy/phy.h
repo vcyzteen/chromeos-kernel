@@ -27,6 +27,7 @@ enum phy_mode {
 	PHY_MODE_USB_HOST,
 	PHY_MODE_USB_DEVICE,
 	PHY_MODE_USB_OTG,
+	PHY_MODE_MIPI_DPHY,
 };
 
 /**
