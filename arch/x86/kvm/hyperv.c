@@ -1105,3 +1105,115 @@ set_result:
 
 	return 1;
 }
+
+int kvm_vcpu_ioctl_get_hv_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid2 *cpuid,
+				struct kvm_cpuid_entry2 __user *entries)
+{
+	struct kvm_cpuid_entry2 cpuid_entries[] = {
+		{ .function = HYPERV_CPUID_VENDOR_AND_MAX_FUNCTIONS },
+		{ .function = HYPERV_CPUID_INTERFACE },
+		{ .function = HYPERV_CPUID_VERSION },
+		{ .function = HYPERV_CPUID_FEATURES },
+		{ .function = HYPERV_CPUID_ENLIGHTMENT_INFO },
+		{ .function = HYPERV_CPUID_IMPLEMENT_LIMITS },
+	};
+	int i, nent = ARRAY_SIZE(cpuid_entries);
+
+	if (cpuid->nent < nent)
+		return -E2BIG;
+
+	if (cpuid->nent > nent)
+		cpuid->nent = nent;
+
+	for (i = 0; i < nent; i++) {
+		struct kvm_cpuid_entry2 *ent = &cpuid_entries[i];
+		u32 signature[3];
+
+		switch (ent->function) {
+		case HYPERV_CPUID_VENDOR_AND_MAX_FUNCTIONS:
+			memcpy(signature, "Linux KVM Hv", 12);
+
+			ent->eax = HYPERV_CPUID_IMPLEMENT_LIMITS;
+			ent->ebx = signature[0];
+			ent->ecx = signature[1];
+			ent->edx = signature[2];
+			break;
+
+		case HYPERV_CPUID_INTERFACE:
+			memcpy(signature, "Hv#1\0\0\0\0\0\0\0\0", 12);
+			ent->eax = signature[0];
+			break;
+
+		case HYPERV_CPUID_VERSION:
+			/*
+			 * We implement some Hyper-V 2016 functions so let's use
+			 * this version.
+			 */
+			ent->eax = 0x00003839;
+			ent->ebx = 0x000A0000;
+			break;
+
+		case HYPERV_CPUID_FEATURES:
+			ent->eax |= HV_X64_MSR_VP_RUNTIME_AVAILABLE;
+			ent->eax |= HV_X64_MSR_TIME_REF_COUNT_AVAILABLE;
+			ent->eax |= HV_X64_MSR_SYNIC_AVAILABLE;
+			ent->eax |= HV_X64_MSR_SYNTIMER_AVAILABLE;
+			ent->eax |= HV_X64_MSR_APIC_ACCESS_AVAILABLE;
+			ent->eax |= HV_X64_MSR_HYPERCALL_AVAILABLE;
+			ent->eax |= HV_X64_MSR_VP_INDEX_AVAILABLE;
+			ent->eax |= HV_X64_MSR_RESET_AVAILABLE;
+			ent->eax |= HV_X64_MSR_REFERENCE_TSC_AVAILABLE;
+			// Lines commented out have not been packported to 4.4.
+			// ent->eax |= HV_X64_MSR_GUEST_IDLE_AVAILABLE;
+			// ent->eax |= HV_X64_ACCESS_FREQUENCY_MSRS;
+			// ent->eax |= HV_X64_ACCESS_REENLIGHTENMENT;
+
+			ent->ebx |= HV_X64_POST_MESSAGES;
+			ent->ebx |= HV_X64_SIGNAL_EVENTS;
+
+			// ent->edx |= HV_FEATURE_FREQUENCY_MSRS_AVAILABLE;
+			ent->edx |= HV_X64_GUEST_CRASH_MSR_AVAILABLE;
+			// ent->edx |= HV_STIMER_DIRECT_MODE_AVAILABLE;
+
+			break;
+
+		case HYPERV_CPUID_ENLIGHTMENT_INFO:
+			// Lines commented out have not been packported to 4.4.
+			ent->eax |= HV_X64_REMOTE_TLB_FLUSH_RECOMMENDED;
+			ent->eax |= HV_X64_APIC_ACCESS_RECOMMENDED;
+			ent->eax |= HV_X64_SYSTEM_RESET_RECOMMENDED;
+			ent->eax |= HV_X64_RELAXED_TIMING_RECOMMENDED;
+			// ent->eax |= HV_X64_CLUSTER_IPI_RECOMMENDED;
+			// ent->eax |= HV_X64_EX_PROCESSOR_MASKS_RECOMMENDED;
+			// ent->eax |= HV_X64_ENLIGHTENED_VMCS_RECOMMENDED;
+
+			/*
+			 * Default number of spinlock retry attempts, matches
+			 * HyperV 2016.
+			 */
+			ent->ebx = 0x00000FFF;
+
+			break;
+
+		case HYPERV_CPUID_IMPLEMENT_LIMITS:
+			/* Maximum number of virtual processors */
+			ent->eax = KVM_MAX_VCPUS;
+			/*
+			 * Maximum number of logical processors, matches
+			 * HyperV 2016.
+			 */
+			ent->ebx = 64;
+
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	if (copy_to_user(entries, cpuid_entries,
+			 nent * sizeof(struct kvm_cpuid_entry2)))
+		return -EFAULT;
+
+	return 0;
+}

@@ -84,4 +84,7 @@ static inline bool kvm_hv_has_stimer_pending(struct kvm_vcpu *vcpu)
 
 void kvm_hv_process_stimers(struct kvm_vcpu *vcpu);
 
+int kvm_vcpu_ioctl_get_hv_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid2 *cpuid,
+				struct kvm_cpuid_entry2 __user *entries);
+
 #endif
