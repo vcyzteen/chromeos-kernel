@@ -1164,7 +1164,6 @@ int kvm_vcpu_ioctl_get_hv_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid2 *cpuid,
 			ent->eax |= HV_X64_MSR_RESET_AVAILABLE;
 			ent->eax |= HV_X64_MSR_REFERENCE_TSC_AVAILABLE;
 			// Lines commented out have not been packported to 4.4.
-			// ent->eax |= HV_X64_MSR_GUEST_IDLE_AVAILABLE;
 			// ent->eax |= HV_X64_ACCESS_FREQUENCY_MSRS;
 			// ent->eax |= HV_X64_ACCESS_REENLIGHTENMENT;
 
