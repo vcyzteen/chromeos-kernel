@@ -1183,7 +1183,8 @@ int kvm_vcpu_ioctl_get_hv_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid2 *cpuid,
 			ent->eax |= HV_X64_RELAXED_TIMING_RECOMMENDED;
 			// ent->eax |= HV_X64_CLUSTER_IPI_RECOMMENDED;
 			// ent->eax |= HV_X64_EX_PROCESSOR_MASKS_RECOMMENDED;
-			// ent->eax |= HV_X64_ENLIGHTENED_VMCS_RECOMMENDED;
+			// if (kvm_x86_ops->nested_get_evmcs_version(vcpu))
+			//	ent->eax |= HV_X64_ENLIGHTENED_VMCS_RECOMMENDED;
 
 			/*
 			 * Default number of spinlock retry attempts, matches
