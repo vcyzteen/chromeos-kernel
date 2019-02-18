@@ -1012,6 +1012,12 @@ static void v4l_sanitize_format(struct v4l2_format *fmt)
 {
 	unsigned int offset;
 
+	/* Make sure num_planes is not bogus */
+	if (fmt->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
+	    fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+		fmt->fmt.pix_mp.num_planes = min_t(u32, fmt->fmt.pix_mp.num_planes,
+					       VIDEO_MAX_PLANES);
+
 	/*
 	 * The v4l2_pix_format structure has been extended with fields that were
 	 * not previously required to be set to zero by applications. The priv
