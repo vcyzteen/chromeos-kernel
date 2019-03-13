@@ -17,7 +17,6 @@
  * iio sysfs.
  */
 
-#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/iio/buffer.h>
 #include <linux/iio/common/cros_ec_sensors_core.h>
