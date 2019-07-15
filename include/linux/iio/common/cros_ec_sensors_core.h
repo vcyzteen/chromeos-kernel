@@ -85,6 +85,8 @@ struct cros_ec_sensors_core_state {
 		s16 offset;
 	} calib[MAX_AXIS];
 
+	s8 sign[MAX_AXIS];
+
 	/*
 	 * Static array to hold data from a single capture. For each
 	 * channel we need 2 bytes, except for the timestamp. The timestamp

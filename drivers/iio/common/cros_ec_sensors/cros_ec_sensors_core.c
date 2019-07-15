@@ -127,6 +127,9 @@ int cros_ec_sensors_core_init(struct platform_device *pdev,
 		}
 		state->type = state->resp->info.type;
 		state->loc = state->resp->info.location;
+
+		/* Set sign vector, only used for backward compatibility. */
+		memset(state->sign, 1, MAX_AXIS);
 	}
 	return 0;
 }
@@ -331,6 +334,7 @@ static void read_ec_sensors_data_unsafe(struct iio_dev *indio_dev,
 	 */
 	for_each_set_bit(i, &scan_mask, indio_dev->masklength) {
 		ec_cmd_read_u16(ec, idx_to_reg(st, i), data);
+		*data *= st->sign[i];
 		data++;
 	}
 }
