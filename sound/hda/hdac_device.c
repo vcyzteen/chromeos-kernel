@@ -1012,10 +1012,17 @@ static unsigned int codec_read(struct hdac_device *hdac, hda_nid_t nid,
 {
 	unsigned int cmd = snd_hdac_make_cmd(hdac, nid, verb, parm);
 	unsigned int res;
+	unsigned int count;
 
-	if (snd_hdac_exec_verb(hdac, cmd, flags, &res))
-		return -1;
-
+	/* Retry verb once more if it fails first time */
+	/* recommended to retry since it is HW related */
+	for (count = 0; count <= 1; count++) {
+		if (snd_hdac_exec_verb(hdac, cmd, flags, &res)) {
+			if (count == 1)
+				return -1;
+		} else
+			break;
+	}
 	return res;
 }
 
