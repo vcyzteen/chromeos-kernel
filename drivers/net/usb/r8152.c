@@ -5963,22 +5963,28 @@ static int rtl8152_set_link_ksettings(struct net_device *dev,
 	if (ret < 0)
 		goto out;
 
-	if (cmd->advertising & ADVERTISED_10baseT_Half)
+	if (test_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_10_HALF;
 
-	if (cmd->advertising & ADVERTISED_10baseT_Full)
+	if (test_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_10_FULL;
 
-	if (cmd->advertising & ADVERTISED_100baseT_Half)
+	if (test_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_100_HALF;
 
-	if (cmd->advertising & ADVERTISED_100baseT_Full)
+	if (test_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_100_FULL;
 
-	if (cmd->advertising & ADVERTISED_1000baseT_Half)
+	if (test_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_1000_HALF;
 
-	if (cmd->advertising & ADVERTISED_1000baseT_Full)
+	if (test_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+		     cmd->link_modes.advertising))
 		advertising |= RTL_ADVERTISED_1000_FULL;
 
 	mutex_lock(&tp->control);
