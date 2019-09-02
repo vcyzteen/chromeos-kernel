@@ -761,6 +761,7 @@ struct r8152 {
 	u32 msg_enable;
 	u32 tx_qlen;
 	u32 coalesce;
+	u32 advertising;
 	u32 rx_buf_sz;
 	u32 rx_copybreak;
 	u32 rx_pending;
@@ -830,6 +831,13 @@ struct rtltool_cmd {
 	struct sockaddr ifru_netmask;
 	struct sockaddr ifru_hwaddr;
 };
+
+#define RTL_ADVERTISED_10_HALF			BIT(0)
+#define RTL_ADVERTISED_10_FULL			BIT(1)
+#define RTL_ADVERTISED_100_HALF			BIT(2)
+#define RTL_ADVERTISED_100_FULL			BIT(3)
+#define RTL_ADVERTISED_1000_HALF		BIT(4)
+#define RTL_ADVERTISED_1000_FULL		BIT(5)
 
 /* Maximum number of multicast addresses to filter (vs. Rx-all-multicast).
  * The RTL chips use a 64 element hash table based on the Ethernet CRC.
@@ -3856,90 +3864,117 @@ static void rtl8153b_disable(struct r8152 *tp)
 	r8153b_aldps_en(tp, true);
 }
 
-static int rtl8152_set_speed(struct r8152 *tp, u8 autoneg, u16 speed, u8 duplex)
+static int rtl8152_set_speed(struct r8152 *tp, u8 autoneg, u32 speed, u8 duplex,
+			     u32 advertising)
 {
-	u16 bmcr, anar, gbcr;
 	enum spd_duplex speed_duplex;
+	u16 bmcr;
 	int ret = 0;
 
-	anar = r8152_mdio_read(tp, MII_ADVERTISE);
-	anar &= ~(ADVERTISE_10HALF | ADVERTISE_10FULL |
-		  ADVERTISE_100HALF | ADVERTISE_100FULL);
-	if (tp->mii.supports_gmii) {
-		gbcr = r8152_mdio_read(tp, MII_CTRL1000);
-		gbcr &= ~(ADVERTISE_1000FULL | ADVERTISE_1000HALF);
-	} else {
-		gbcr = 0;
-	}
-
 	if (autoneg == AUTONEG_DISABLE) {
-		if (speed == SPEED_10) {
-			bmcr = 0;
-			anar |= ADVERTISE_10HALF | ADVERTISE_10FULL;
-			speed_duplex = FORCE_10M_HALF;
-		} else if (speed == SPEED_100) {
+		if (duplex != DUPLEX_HALF && duplex != DUPLEX_FULL)
+			return -EINVAL;
+
+		switch (speed) {
+		case SPEED_10:
+			bmcr = BMCR_SPEED10;
+			if (duplex == DUPLEX_FULL) {
+				bmcr |= BMCR_FULLDPLX;
+				speed_duplex = FORCE_10M_FULL;
+			} else {
+				speed_duplex = FORCE_10M_HALF;
+			}
+			break;
+		case SPEED_100:
 			bmcr = BMCR_SPEED100;
-			anar |= ADVERTISE_100HALF | ADVERTISE_100FULL;
-			speed_duplex = FORCE_100M_HALF;
-		} else if (speed == SPEED_1000 && tp->mii.supports_gmii) {
-			bmcr = BMCR_SPEED1000;
-			gbcr |= ADVERTISE_1000FULL | ADVERTISE_1000HALF;
-			speed_duplex = NWAY_1000M_FULL;
-		} else {
+			if (duplex == DUPLEX_FULL) {
+				bmcr |= BMCR_FULLDPLX;
+				speed_duplex = FORCE_100M_FULL;
+			} else {
+				speed_duplex = FORCE_100M_HALF;
+			}
+			break;
+		case SPEED_1000:
+			if (tp->mii.supports_gmii) {
+				bmcr = BMCR_SPEED1000 | BMCR_FULLDPLX;
+				speed_duplex = NWAY_1000M_FULL;
+				break;
+			}
+			/* fall through */
+		default:
 			ret = -EINVAL;
 			goto out;
 		}
 
-		if (duplex == DUPLEX_FULL) {
-			bmcr |= BMCR_FULLDPLX;
-			if (speed != SPEED_1000)
-				speed_duplex++;
-		}
+		if (duplex == DUPLEX_FULL)
+			tp->mii.full_duplex = 1;
+		else
+			tp->mii.full_duplex = 0;
+
+		tp->mii.force_media = 1;
 	} else {
-		if (speed == SPEED_10) {
-			if (duplex == DUPLEX_FULL) {
-				anar |= ADVERTISE_10HALF | ADVERTISE_10FULL;
-				speed_duplex = NWAY_10M_FULL;
-			} else {
-				anar |= ADVERTISE_10HALF;
-				speed_duplex = NWAY_10M_HALF;
+		u16 anar, tmp1;
+		u32 support;
+
+		support = RTL_ADVERTISED_10_HALF | RTL_ADVERTISED_10_FULL |
+			  RTL_ADVERTISED_100_HALF | RTL_ADVERTISED_100_FULL;
+
+		if (tp->mii.supports_gmii)
+			support |= RTL_ADVERTISED_1000_FULL;
+
+		if (!(advertising & support))
+			return -EINVAL;
+
+		anar = r8152_mdio_read(tp, MII_ADVERTISE);
+		tmp1 = anar & ~(ADVERTISE_10HALF | ADVERTISE_10FULL |
+				ADVERTISE_100HALF | ADVERTISE_100FULL);
+		if (advertising & RTL_ADVERTISED_10_HALF) {
+			tmp1 |= ADVERTISE_10HALF;
+			speed_duplex = NWAY_10M_HALF;
+		}
+		if (advertising & RTL_ADVERTISED_10_FULL) {
+			tmp1 |= ADVERTISE_10FULL;
+			speed_duplex = NWAY_10M_FULL;
+		}
+
+		if (advertising & RTL_ADVERTISED_100_HALF) {
+			tmp1 |= ADVERTISE_100HALF;
+			speed_duplex = NWAY_100M_HALF;
+		}
+		if (advertising & RTL_ADVERTISED_100_FULL) {
+			tmp1 |= ADVERTISE_100FULL;
+			speed_duplex = NWAY_100M_FULL;
+		}
+
+		if (anar != tmp1) {
+			r8152_mdio_write(tp, MII_ADVERTISE, tmp1);
+			tp->mii.advertising = tmp1;
+		}
+
+		if (tp->mii.supports_gmii) {
+			u16 gbcr;
+
+			gbcr = r8152_mdio_read(tp, MII_CTRL1000);
+			tmp1 = gbcr & ~(ADVERTISE_1000FULL |
+					ADVERTISE_1000HALF);
+
+			if (advertising & RTL_ADVERTISED_1000_FULL) {
+				tmp1 |= ADVERTISE_1000FULL;
+				speed_duplex = NWAY_1000M_FULL;
 			}
-		} else if (speed == SPEED_100) {
-			if (duplex == DUPLEX_FULL) {
-				anar |= ADVERTISE_10HALF | ADVERTISE_10FULL;
-				anar |= ADVERTISE_100HALF | ADVERTISE_100FULL;
-				speed_duplex = NWAY_100M_FULL;
-			} else {
-				anar |= ADVERTISE_10HALF;
-				anar |= ADVERTISE_100HALF;
-				speed_duplex = NWAY_100M_HALF;
-			}
-		} else if (speed == SPEED_1000 && tp->mii.supports_gmii) {
-			if (duplex == DUPLEX_FULL) {
-				anar |= ADVERTISE_10HALF | ADVERTISE_10FULL;
-				anar |= ADVERTISE_100HALF | ADVERTISE_100FULL;
-				gbcr |= ADVERTISE_1000FULL | ADVERTISE_1000HALF;
-			} else {
-				anar |= ADVERTISE_10HALF;
-				anar |= ADVERTISE_100HALF;
-				gbcr |= ADVERTISE_1000HALF;
-			}
-			speed_duplex = NWAY_1000M_FULL;
-		} else {
-			ret = -EINVAL;
-			goto out;
+
+			if (gbcr != tmp1)
+				r8152_mdio_write(tp, MII_CTRL1000, tmp1);
 		}
 
 		bmcr = BMCR_ANENABLE | BMCR_ANRESTART;
+
+		tp->mii.force_media = 0;
 	}
 
 	if (test_and_clear_bit(PHY_RESET, &tp->flags))
 		bmcr |= BMCR_RESET;
 
-	if (tp->mii.supports_gmii)
-		r8152_mdio_write(tp, MII_CTRL1000, gbcr);
-
-	r8152_mdio_write(tp, MII_ADVERTISE, anar);
 	r8152_mdio_write(tp, MII_BMCR, bmcr);
 
 	switch (tp->version) {
@@ -4177,7 +4212,8 @@ static void rtl_hw_phy_work_func_t(struct work_struct *work)
 
 	tp->rtl_ops.hw_phy_cfg(tp);
 
-	rtl8152_set_speed(tp, tp->autoneg, tp->speed, tp->duplex);
+	rtl8152_set_speed(tp, tp->autoneg, tp->speed, tp->duplex,
+			  tp->advertising);
 
 	mutex_unlock(&tp->control);
 
@@ -4915,19 +4951,40 @@ out:
 static int rtl8152_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	struct r8152 *tp = netdev_priv(dev);
+	u32 advertising = 0;
 	int ret;
 
 	ret = usb_autopm_get_interface(tp->intf);
 	if (ret < 0)
 		goto out;
 
+	if (cmd->advertising & ADVERTISED_10baseT_Half)
+		advertising |= RTL_ADVERTISED_10_HALF;
+
+	if (cmd->advertising & ADVERTISED_10baseT_Full)
+		advertising |= RTL_ADVERTISED_10_FULL;
+
+	if (cmd->advertising & ADVERTISED_100baseT_Half)
+		advertising |= RTL_ADVERTISED_100_HALF;
+
+	if (cmd->advertising & ADVERTISED_100baseT_Full)
+		advertising |= RTL_ADVERTISED_100_FULL;
+
+	if (cmd->advertising & ADVERTISED_1000baseT_Half)
+		advertising |= RTL_ADVERTISED_1000_HALF;
+
+	if (cmd->advertising & ADVERTISED_1000baseT_Full)
+		advertising |= RTL_ADVERTISED_1000_FULL;
+
 	mutex_lock(&tp->control);
 
-	ret = rtl8152_set_speed(tp, cmd->autoneg, cmd->speed, cmd->duplex);
+	ret = rtl8152_set_speed(tp, cmd->autoneg, cmd->speed, cmd->duplex,
+				advertising);
 	if (!ret) {
 		tp->autoneg = cmd->autoneg;
 		tp->speed = cmd->speed;
 		tp->duplex = cmd->duplex;
+		tp->advertising = advertising;
 	}
 
 	mutex_unlock(&tp->control);
@@ -5831,7 +5888,13 @@ static int rtl8152_probe(struct usb_interface *intf,
 	tp->mii.phy_id = R8152_PHY_ID;
 
 	tp->autoneg = AUTONEG_ENABLE;
-	tp->speed = tp->mii.supports_gmii ? SPEED_1000 : SPEED_100;
+	tp->speed = SPEED_100;
+	tp->advertising = RTL_ADVERTISED_10_HALF | RTL_ADVERTISED_10_FULL |
+			  RTL_ADVERTISED_100_HALF | RTL_ADVERTISED_100_FULL;
+	if (tp->mii.supports_gmii) {
+		tp->speed = SPEED_1000;
+		tp->advertising |= RTL_ADVERTISED_1000_FULL;
+	}
 	tp->duplex = DUPLEX_FULL;
 
 	tp->rx_copybreak = RTL8152_RXFG_HEADSZ;
