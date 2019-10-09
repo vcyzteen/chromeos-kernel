@@ -100,11 +100,26 @@ int intel_uc_init_hw(struct drm_i915_private *dev_priv)
 	/* We need to notify the guc whenever we change the GGTT */
 	i915_ggtt_enable_guc(dev_priv);
 
-	if (i915.enable_guc_submission) {
-		ret = i915_guc_submission_init(dev_priv);
-		if (ret)
-			goto err;
-	}
+	/*
+	 * http://crbug.com/965320
+	 * Init all GuC resources even if submission disabled.
+	 *
+	 * There is a requirement to load GuC to authenticate HuC, but do not
+	 * enable GuC submission. However, steps required for GuC loading are
+	 * placed to i915_guc_submission_init(), so GuC can't operate properly
+	 * without submission init. GuC initialization was refactored later in
+	 * [c24f0c1de481 drm/i915/guc : Decoupling ADS and logs from submission].
+	 * Backporting this patch pulls a long chain of unrelated dependencies.
+	 *
+	 * Removed check for i915.enable_guc_submission parameter as an alternate
+	 * solution. GuC submission resources are initialized,
+	 * but i915_guc_submission_enable() is still called only if
+	 * i915.enable_guc_submission != 0.
+	 */
+	ret = i915_guc_submission_init(dev_priv);
+	if (ret)
+		goto err;
+	/* http://crbug.com/965320 end */
 
 	/* init WOPCM */
 	I915_WRITE(GUC_WOPCM_SIZE, intel_guc_wopcm_size(dev_priv));
@@ -148,6 +163,23 @@ int intel_uc_init_hw(struct drm_i915_private *dev_priv)
 		ret = i915_guc_submission_enable(dev_priv);
 		if (ret)
 			goto err_submission;
+	} else {
+		/*
+		 * http://crbug.com/965320
+		 * Init GuC PM:
+		 * - Send SAMPLE_FORCEWAKE to lift boost frequency request.
+		 * - Put GUC to sleep and never wake up since we don't need it anymore.
+		 *   Otherwise it consumes ~0.1W after GPU D3->D0 transition.
+		 */
+		struct intel_guc *guc = &dev_priv->guc;
+
+		ret = intel_guc_sample_forcewake(guc);
+		if (ret)
+			goto err_submission;
+
+		ret = intel_guc_suspend(dev_priv);
+		if (ret)
+			goto err_submission;
 	}
 
 	return 0;
@@ -162,8 +194,12 @@ int intel_uc_init_hw(struct drm_i915_private *dev_priv)
 	 * marks the GPU as wedged until reset).
 	 */
 err_submission:
-	if (i915.enable_guc_submission)
-		i915_guc_submission_fini(dev_priv);
+	/*
+	 * http://crbug.com/965320
+	 * Since we call i915_guc_submission() unconditionally, then we need
+	 * to cleanup it as well.
+	 */
+	 i915_guc_submission_fini(dev_priv);
 
 err:
 	i915_ggtt_disable_guc(dev_priv);

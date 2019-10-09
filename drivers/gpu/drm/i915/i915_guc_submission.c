@@ -894,8 +894,22 @@ int i915_guc_submission_init(struct drm_i915_private *dev_priv)
 	bitmap_clear(guc->doorbell_bitmap, 0, GUC_MAX_DOORBELLS);
 	i915_guc_submission_disable(dev_priv);
 
-	if (!i915.enable_guc_submission)
-		return 0; /* not enabled  */
+	/*
+	 * http://crbug.com/965320
+	 * Init all GuC resources even if submission disabled.
+	 *
+	 * There is a requirement to load GuC to authenticate HuC, but do not
+	 * enable GuC submission. However, steps required for GuC loading are
+	 * placed here, so GuC can't operate properly without calling this
+	 * function. GuC initialization was refactored later in
+	 * [c24f0c1de481 drm/i915/guc : Decoupling ADS and logs from submission].
+	 * Backporting this patch pulls a long chain of unrelated dependencies.
+	 *
+	 * Removed check for i915.enable_guc_submission parameter as an alternate
+	 * solution. GuC submission resources are initialized,
+	 * but i915_guc_submission_enable() is still called only if
+	 * i915.enable_guc_submission != 0, see intel_uc_init_hw().
+	 */
 
 	if (guc->ctx_pool_vma)
 		return 0; /* already allocated */
@@ -1085,8 +1099,12 @@ int intel_guc_resume(struct drm_i915_private *dev_priv)
 	struct i915_gem_context *ctx;
 	u32 data[3];
 
-	if (guc->fw.load_status != INTEL_UC_FIRMWARE_SUCCESS)
-		return 0;
+	/*
+	 * http://crbug.com/965320
+	 * Do not wake GuC: we don't need it after startup.
+	 * Otherwise it consumes ~0.1W after GPU D3->D0 transition.
+	 */
+	return 0;
 
 	if (i915.guc_log_level >= 0)
 		gen9_enable_guc_interrupts(dev_priv);
