@@ -23,6 +23,7 @@
 #include <linux/export.h>
 #include <drm/drmP.h>
 #include <drm/drm_framebuffer.h>
+#include <drm/drm_gem.h>
 
 #include "drm_crtc_internal.h"
 
@@ -479,6 +480,100 @@ int drm_mode_getfb(struct drm_device *dev,
 
 	return ret;
 }
+
+/**
+ * drm_mode_getfb2 - get extended FB info
+ * @dev: drm device for the ioctl
+ * @data: data pointer for the ioctl
+ * @file_priv: drm file for the ioctl call
+ *
+ * Lookup the FB given its ID and return info about it.
+ *
+ * Called by the user via ioctl.
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int drm_mode_getfb2(struct drm_device *dev,
+		   void *data, struct drm_file *file_priv)
+{
+	struct drm_mode_fb_cmd2 *r = data;
+	struct drm_framebuffer *fb;
+	unsigned int i;
+	int ret;
+
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		return -EINVAL;
+
+	fb = drm_framebuffer_lookup(dev, r->fb_id);
+	if (!fb)
+		return -ENOENT;
+
+	if (!fb->funcs->create_handle) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	r->height = fb->height;
+	r->width = fb->width;
+	r->pixel_format = fb->format->format;
+
+	r->flags = 0;
+	if (dev->mode_config.allow_fb_modifiers)
+		r->flags |= DRM_MODE_FB_MODIFIERS;
+
+	for (i = 0; i < ARRAY_SIZE(r->handles); ++i) {
+		r->handles[i] = 0;
+		r->pitches[i] = 0;
+		r->offsets[i] = 0;
+		r->modifier[i] = 0;
+	}
+
+	for (i = 0; i < fb->format->num_planes; i++) {
+		r->pitches[i] = fb->pitches[i];
+		r->offsets[i] = fb->offsets[i];
+		if (dev->mode_config.allow_fb_modifiers)
+			r->modifier[i] = fb->modifier;
+
+		/* Use the same handle for all extra planes
+		 */
+		if (i > 0) {
+			r->handles[i] = r->handles[0];
+			continue;
+		}
+
+		if (r->handles[i])
+			continue;
+
+		ret = fb->funcs->create_handle(fb, file_priv,
+					       &r->handles[i]);
+
+		if (ret != 0)
+			goto out;
+	}
+out:
+	if (ret != 0) {
+		/* Delete any previously-created handles on failure. */
+		for (i = 0; i < ARRAY_SIZE(r->handles); i++) {
+			int j;
+
+			if (r->handles[i])
+				drm_gem_handle_delete(file_priv, r->handles[i]);
+
+			/* Zero out any handles identical to the one we just
+			 * deleted.
+			 */
+			for (j = i + 1; j < ARRAY_SIZE(r->handles); j++) {
+				if (r->handles[j] == r->handles[i])
+					r->handles[j] = 0;
+			}
+		}
+	}
+
+	drm_framebuffer_unreference(fb);
+	return ret;
+}
+
 
 /**
  * drm_mode_dirtyfb_ioctl - flush frontbuffer rendering on an FB

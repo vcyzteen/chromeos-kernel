@@ -168,6 +168,8 @@ int drm_mode_rmfb(struct drm_device *dev,
 		  void *data, struct drm_file *file_priv);
 int drm_mode_getfb(struct drm_device *dev,
 		   void *data, struct drm_file *file_priv);
+int drm_mode_getfb2(struct drm_device *dev,
+			  void *data, struct drm_file *file_priv);
 int drm_mode_dirtyfb_ioctl(struct drm_device *dev,
 			   void *data, struct drm_file *file_priv);
 
