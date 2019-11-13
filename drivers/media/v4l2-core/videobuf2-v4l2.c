@@ -315,6 +315,14 @@ static int __fill_vb2_buffer(struct vb2_buffer *vb,
 					b->m.planes[plane].m.fd;
 				planes[plane].length =
 					b->m.planes[plane].length;
+				/* TODO(crbug.com/901264): The way to pass an
+				 * offset with a DmaBuf is not defined in V4L2
+				 * specification. This is a local hack to abuse
+				 * data_offset for the purpose. Replace it after
+				 * the appropriate way is defined in upstream.
+				 */
+				planes[plane].data_offset =
+					b->m.planes[plane].data_offset;
 			}
 		}
 
