@@ -152,8 +152,7 @@ static int ppgtt_bind_vma(struct i915_vma *vma,
 {
 	u32 pte_flags = 0;
 
-	/* Applicable to VLV, and gen8+ */
-	pte_flags = 0;
+	/* Currently applicable only to VLV */
 	if (vma->obj->gt_ro)
 		pte_flags |= PTE_READ_ONLY;
 
@@ -784,8 +783,7 @@ gen8_ppgtt_insert_pte_entries(struct i915_address_space *vm,
 			      struct i915_page_directory_pointer *pdp,
 			      struct sg_page_iter *sg_iter,
 			      uint64_t start,
-			      enum i915_cache_level cache_level,
-			      u32 flags)
+			      enum i915_cache_level cache_level)
 {
 	struct i915_hw_ppgtt *ppgtt =
 		container_of(vm, struct i915_hw_ppgtt, base);
@@ -805,7 +803,7 @@ gen8_ppgtt_insert_pte_entries(struct i915_address_space *vm,
 
 		pt_vaddr[pte] =
 			gen8_pte_encode(sg_page_iter_dma_address(sg_iter),
-					cache_level, true, flags);
+					cache_level, true, 0);
 		if (++pte == GEN8_PTES) {
 			kunmap_px(ppgtt, pt_vaddr);
 			pt_vaddr = NULL;
@@ -826,7 +824,7 @@ static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
 				      struct sg_table *pages,
 				      uint64_t start,
 				      enum i915_cache_level cache_level,
-				      u32 flags)
+				      u32 unused)
 {
 	struct i915_hw_ppgtt *ppgtt =
 		container_of(vm, struct i915_hw_ppgtt, base);
@@ -836,7 +834,7 @@ static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
 
 	if (!USES_FULL_48BIT_PPGTT(vm->dev)) {
 		gen8_ppgtt_insert_pte_entries(vm, &ppgtt->pdp, &sg_iter, start,
-					      cache_level, flags);
+					      cache_level);
 	} else {
 		struct i915_page_directory_pointer *pdp;
 		uint64_t templ4, pml4e;
@@ -844,7 +842,7 @@ static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
 
 		gen8_for_each_pml4e(pdp, &ppgtt->pml4, start, length, templ4, pml4e) {
 			gen8_ppgtt_insert_pte_entries(vm, pdp, &sg_iter,
-						      start, cache_level, flags);
+						      start, cache_level);
 		}
 	}
 }
@@ -1521,10 +1519,6 @@ static int gen8_ppgtt_init(struct i915_hw_ppgtt *ppgtt)
 	ppgtt->base.clear_range = gen8_ppgtt_clear_range;
 	ppgtt->base.unbind_vma = ppgtt_unbind_vma;
 	ppgtt->base.bind_vma = ppgtt_bind_vma;
-
-	/* From bdw, there is support for read-only pages in the PPGTT */
-	ppgtt->base.has_read_only = true;
-
 	ppgtt->debug_dump = gen8_dump_ppgtt;
 
 	if (USES_FULL_48BIT_PPGTT(ppgtt->base.dev)) {
@@ -2353,7 +2347,7 @@ static void gen8_set_pte(void __iomem *addr, gen8_pte_t pte)
 static void gen8_ggtt_insert_entries(struct i915_address_space *vm,
 				     struct sg_table *st,
 				     uint64_t start,
-				     enum i915_cache_level level, u32 flags)
+				     enum i915_cache_level level, u32 unused)
 {
 	struct drm_i915_private *dev_priv = vm->dev->dev_private;
 	unsigned first_entry = start >> PAGE_SHIFT;
@@ -2367,7 +2361,7 @@ static void gen8_ggtt_insert_entries(struct i915_address_space *vm,
 		addr = sg_dma_address(sg_iter.sg) +
 			(sg_iter.sg_pgoffset << PAGE_SHIFT);
 		gen8_set_pte(&gtt_entries[i],
-			     gen8_pte_encode(addr, level, true, flags));
+			     gen8_pte_encode(addr, level, true, 0));
 		i++;
 	}
 
@@ -2380,7 +2374,7 @@ static void gen8_ggtt_insert_entries(struct i915_address_space *vm,
 	 */
 	if (i != 0)
 		WARN_ON(readq(&gtt_entries[i-1])
-			!= gen8_pte_encode(addr, level, true, flags));
+			!= gen8_pte_encode(addr, level, true, 0));
 
 	/* This next bit makes the above posting read even more important. We
 	 * want to flush the TLBs only after we're certain all the PTE updates
@@ -2520,8 +2514,7 @@ static int ggtt_bind_vma(struct i915_vma *vma,
 	if (ret)
 		return ret;
 
-	/* Applicable to VLV (gen8+ do not support RO in the GGTT) */
-	pte_flags = 0;
+	/* Currently applicable only to VLV */
 	if (obj->gt_ro)
 		pte_flags |= PTE_READ_ONLY;
 
@@ -2663,9 +2656,6 @@ static int i915_gem_setup_global_gtt(struct drm_device *dev,
 	ggtt_vm->total = end - start - PAGE_SIZE;
 	i915_address_space_init(ggtt_vm, dev_priv);
 	ggtt_vm->total += PAGE_SIZE;
-
-	/* Only VLV supports read-only GGTT mappings */
-	ggtt_vm->has_read_only = IS_VALLEYVIEW(dev_priv);
 
 	if (intel_vgpu_active(dev)) {
 		ret = intel_vgt_balloon(dev);
