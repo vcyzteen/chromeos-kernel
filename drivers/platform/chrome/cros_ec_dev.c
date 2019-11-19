@@ -392,37 +392,6 @@ static void __remove(struct device *dev)
 	kfree(ec);
 }
 
-int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
-{
-	if (ec->features[0] == -1U && ec->features[1] == -1U) {
-		/* features bitmap not read yet */
-		struct cros_ec_command *msg;
-		int ret;
-
-		msg = kzalloc(sizeof(*msg) + sizeof(ec->features), GFP_KERNEL);
-		if (!msg)
-			return 0;
-
-		msg->command = EC_CMD_GET_FEATURES + ec->cmd_offset;
-		msg->insize = sizeof(ec->features);
-
-		ret = cros_ec_cmd_xfer(ec->ec_dev, msg);
-		if (ret < 0 || msg->result != EC_RES_SUCCESS) {
-			dev_warn(ec->dev, "cannot get EC features: %d/%d\n",
-				 ret, msg->result);
-			memset(ec->features, 0, sizeof(ec->features));
-		} else {
-			memcpy(ec->features, msg->data, sizeof(ec->features));
-		}
-		kfree(msg);
-		dev_dbg(ec->dev, "EC features %08x %08x\n",
-			ec->features[0], ec->features[1]);
-	}
-
-	return ec->features[feature / 32] & EC_FEATURE_MASK_0(feature);
-}
-EXPORT_SYMBOL_GPL(cros_ec_check_features);
-
 static const struct mfd_cell cros_usb_pd_charger_devs[] = {
 	{
 		.name = "cros-usb-pd-charger",
