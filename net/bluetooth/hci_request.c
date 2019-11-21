@@ -664,6 +664,15 @@ void hci_req_add_le_scan_disable(struct hci_request *req)
 	cp.enable = LE_SCAN_DISABLE;
 	BT_DBG("BT_DBG_DG: set scan enable tx: hci_req_add_le_scan_disable (ena=%d)\n", cp.enable);
 	hci_req_add(req, HCI_OP_LE_SET_SCAN_ENABLE, sizeof(cp), &cp);
+
+	/* It is possible that the only HCI command built into the command queue
+	 * is HCI_OP_LE_SET_SCAN_ENABLE. If the only command is skipped
+	 * at run time in hci_core.c:hci_cmd_work(), the corresponding event
+	 * would never be received. This would accidentally cause HCI command
+	 * timeout. Hence, it is important to add this dummy HCI command to
+	 * invoke the hci_req_sync_complete() callback.
+	 */
+	hci_req_add(req, HCI_OP_READ_LOCAL_NAME, 0, NULL);
 }
 
 static void add_to_white_list(struct hci_request *req,
@@ -827,7 +836,8 @@ void hci_req_add_le_passive_scan(struct hci_request *req)
 
 	memset(&enable_cp, 0, sizeof(enable_cp));
 	enable_cp.enable = LE_SCAN_ENABLE;
-	enable_cp.filter_dup = LE_SCAN_FILTER_DUP_DISABLE;
+	enable_cp.filter_dup = (hdev->le_scan_type == LE_SCAN_PASSIVE) ?
+			LE_SCAN_FILTER_DUP_ENABLE : LE_SCAN_FILTER_DUP_DISABLE;
 	hci_req_add(req, HCI_OP_LE_SET_SCAN_ENABLE, sizeof(enable_cp),
 		    &enable_cp);
 }
@@ -1923,7 +1933,6 @@ static int le_scan_restart(struct hci_request *req, unsigned long opt)
 	struct hci_dev *hdev = req->hdev;
 	struct hci_cp_le_set_scan_enable cp;
 
-
 	/* If controller is not scanning or about to scan we are done. */
 	if (!hci_dev_test_flag(hdev, HCI_LE_SCAN) && !hci_dev_test_flag(hdev, HCI_LE_SCAN_CHANGE_IN_PROGRESS))
 		return 0;
@@ -1933,7 +1942,8 @@ static int le_scan_restart(struct hci_request *req, unsigned long opt)
 
 	memset(&cp, 0, sizeof(cp));
 	cp.enable = LE_SCAN_ENABLE;
-	cp.filter_dup = LE_SCAN_FILTER_DUP_DISABLE;
+	cp.filter_dup = (hdev->le_scan_type == LE_SCAN_PASSIVE) ?
+			LE_SCAN_FILTER_DUP_ENABLE : LE_SCAN_FILTER_DUP_DISABLE;
 	hci_req_add(req, HCI_OP_LE_SET_SCAN_ENABLE, sizeof(cp), &cp);
 
 	return 0;
@@ -1988,13 +1998,6 @@ unlock:
 	hci_dev_unlock(hdev);
 }
 
-static void disable_advertising(struct hci_request *req)
-{
-	u8 enable = 0x00;
-
-	hci_req_add(req, HCI_OP_LE_SET_ADV_ENABLE, sizeof(enable), &enable);
-}
-
 static int active_scan(struct hci_request *req, unsigned long opt)
 {
 	uint16_t interval = opt;
@@ -2005,24 +2008,6 @@ static int active_scan(struct hci_request *req, unsigned long opt)
 	int err;
 
 	BT_DBG("%s", hdev->name);
-
-	if (hci_dev_test_flag(hdev, HCI_LE_ADV) || hci_dev_test_flag(hdev, HCI_LE_ADV_CHANGE_IN_PROGRESS)) {
-
-		hci_dev_lock(hdev);
-
-		/* Don't let discovery abort an outgoing connection attempt
-		 * that's using directed advertising.
-		 */
-		if (hci_lookup_le_connect(hdev)) {
-			hci_dev_unlock(hdev);
-			return -EBUSY;
-		}
-
-		cancel_adv_timeout(hdev);
-		hci_dev_unlock(hdev);
-
-		disable_advertising(req);
-	}
 
 	/* If controller is scanning, it means the background scanning is
 	 * running. Thus, we should temporarily stop it in order to set the
@@ -2051,7 +2036,8 @@ static int active_scan(struct hci_request *req, unsigned long opt)
 
 	memset(&enable_cp, 0, sizeof(enable_cp));
 	enable_cp.enable = LE_SCAN_ENABLE;
-	enable_cp.filter_dup = LE_SCAN_FILTER_DUP_DISABLE;
+	enable_cp.filter_dup = (hdev->le_scan_type == LE_SCAN_PASSIVE) ?
+			LE_SCAN_FILTER_DUP_ENABLE : LE_SCAN_FILTER_DUP_DISABLE;
 
 	BT_DBG("BT_DBG_DG: set scan enable tx: active_scan (ena=%d)\n", enable_cp.enable);
 	hci_req_add(req, HCI_OP_LE_SET_SCAN_ENABLE, sizeof(enable_cp),
@@ -2114,7 +2100,10 @@ static void start_discovery(struct hci_dev *hdev, u8 *status)
 		break;
 	case DISCOV_TYPE_LE:
 		timeout = msecs_to_jiffies(DISCOV_LE_TIMEOUT);
-		hci_req_sync(hdev, active_scan, DISCOV_LE_SCAN_INT,
+		/* Reduce the LE active scan duty cycle to 50% by increasing
+		 * the scan interval from 11.25ms to 22.5ms
+		 */
+		hci_req_sync(hdev, active_scan, DISCOV_LE_SCAN_INT * 2,
 			     HCI_CMD_TIMEOUT, status);
 		break;
 	default:

@@ -13,6 +13,7 @@
 #include <linux/uprobes.h>
 #include <linux/page-flags-layout.h>
 #include <linux/percpu.h>
+#include <linux/workqueue.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -58,58 +59,64 @@ struct page {
 	};
 
 	/* Second double word */
-	struct {
-		union {
-			pgoff_t index;		/* Our offset within mapping. */
-			void *freelist;		/* sl[aou]b first free object */
-		};
+	union {
+		pgoff_t index;		/* Our offset within mapping. */
+		void *freelist;		/* sl[aou]b first free object */
+	};
 
-		union {
+	union {
+		/*
+		 * If the page is neither PageSlab nor mappable to userspace,
+		 * the value stored here may help determine what this page
+		 * is used for.  See page-flags.h for a list of page types
+		 * which are currently stored here.
+		 */
+		unsigned int page_type;
+
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
 	defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
-			/* Used for cmpxchg_double in slub */
-			unsigned long counters;
+		/* Used for cmpxchg_double in slub */
+		unsigned long counters;
 #else
-			/*
-			 * Keep _count separate from slub cmpxchg_double data.
-			 * As the rest of the double word is protected by
-			 * slab_lock but _count is not.
-			 */
-			unsigned counters;
+		/*
+		 * Keep _count separate from slub cmpxchg_double data.
+		 * As the rest of the double word is protected by
+		 * slab_lock but _count is not.
+		 */
+		unsigned counters;
 #endif
 
-			struct {
+		struct {
 
-				union {
-					/*
-					 * Count of ptes mapped in
-					 * mms, to show when page is
-					 * mapped & limit reverse map
-					 * searches.
-					 *
-					 * Used also for tail pages
-					 * refcounting instead of
-					 * _count. Tail pages cannot
-					 * be mapped and keeping the
-					 * tail page _count zero at
-					 * all times guarantees
-					 * get_page_unless_zero() will
-					 * never succeed on tail
-					 * pages.
-					 */
-					atomic_t _mapcount;
+			union {
+				/*
+				 * Count of ptes mapped in
+				 * mms, to show when page is
+				 * mapped & limit reverse map
+				 * searches.
+				 *
+				 * Used also for tail pages
+				 * refcounting instead of
+				 * _count. Tail pages cannot
+				 * be mapped and keeping the
+				 * tail page _count zero at
+				 * all times guarantees
+				 * get_page_unless_zero() will
+				 * never succeed on tail
+				 * pages.
+				 */
+				atomic_t _mapcount;
 
-					struct { /* SLUB */
-						unsigned inuse:16;
-						unsigned objects:15;
-						unsigned frozen:1;
-					};
-					int units;	/* SLOB */
+				struct { /* SLUB */
+					unsigned inuse:16;
+					unsigned objects:15;
+					unsigned frozen:1;
 				};
-				atomic_t _count;		/* Usage count, see below. */
+				int units;	/* SLOB */
 			};
-			unsigned int active;	/* SLAB */
+			atomic_t _count;		/* Usage count, see below. */
 		};
+		unsigned int active;	/* SLAB */
 	};
 
 	/*
@@ -377,9 +384,10 @@ struct core_state {
 };
 
 enum {
-	MM_FILEPAGES,
-	MM_ANONPAGES,
-	MM_SWAPENTS,
+	MM_FILEPAGES,	/* Resident file mapping pages */
+	MM_ANONPAGES,	/* Resident anonymous pages */
+	MM_SWAPENTS,	/* Anonymous swap entries */
+	MM_SHMEMPAGES,	/* Resident shared memory pages */
 	NR_MM_COUNTERS
 };
 
@@ -400,7 +408,7 @@ struct kioctx_table;
 struct mm_struct {
 	struct vm_area_struct *mmap;		/* list of VMAs */
 	struct rb_root mm_rb;
-	u32 vmacache_seqnum;                   /* per-thread vmacache */
+	u64 vmacache_seqnum;                   /* per-thread vmacache */
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
@@ -524,6 +532,7 @@ struct mm_struct {
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
 #endif
+	struct work_struct async_put_work;
 };
 
 static inline void mm_init_cpumask(struct mm_struct *mm)

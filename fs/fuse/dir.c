@@ -1654,13 +1654,37 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		return err;
 
 	if (attr->ia_valid & ATTR_OPEN) {
-		if (fc->atomic_o_trunc)
+		/* This is coming from open(..., ... | O_TRUNC); */
+		WARN_ON(!(attr->ia_valid & ATTR_SIZE));
+		WARN_ON(attr->ia_size != 0);
+		if (fc->atomic_o_trunc) {
+			/*
+			 * No need to send request to userspace, since actual
+			 * truncation has already been done by OPEN.  But still
+			 * need to truncate page cache.
+			 */
+			i_size_write(inode, 0);
+			truncate_pagecache(inode, 0);
 			return 0;
+		}
 		file = NULL;
 	}
 
 	if (attr->ia_valid & ATTR_SIZE)
 		is_truncate = true;
+
+	/* Flush dirty data/metadata before non-truncate SETATTR */
+	if (is_wb && S_ISREG(inode->i_mode) &&
+	    attr->ia_valid &
+			(ATTR_MODE | ATTR_UID | ATTR_GID | ATTR_MTIME_SET |
+			 ATTR_TIMES_SET)) {
+		err = write_inode_now(inode, true);
+		if (err)
+			return err;
+
+		fuse_set_nowrite(inode);
+		fuse_release_nowrite(inode);
+	}
 
 	if (is_truncate) {
 		fuse_set_nowrite(inode);

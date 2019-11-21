@@ -503,51 +503,55 @@ static inline int PageTransTail(struct page *page)
 #endif
 
 /*
- * PageBuddy() indicate that the page is free and in the buddy system
- * (see mm/page_alloc.c).
- *
- * PAGE_BUDDY_MAPCOUNT_VALUE must be <= -2 but better not too close to
- * -2 so that an underflow of the page_mapcount() won't be mistaken
- * for a genuine PAGE_BUDDY_MAPCOUNT_VALUE. -128 can be created very
- * efficiently by most CPU architectures.
+ * For pages that are never mapped to userspace (and aren't PageSlab),
+ * page_type may be used.  Because it is initialised to -1, we invert the
+ * sense of the bit, so __SetPageFoo *clears* the bit used for PageFoo, and
+ * __ClearPageFoo *sets* the bit used for PageFoo.  We reserve a few high and
+ * low bits so that an underflow or overflow of page_mapcount() won't be
+ * mistaken for a page type value.
  */
-#define PAGE_BUDDY_MAPCOUNT_VALUE (-128)
 
-static inline int PageBuddy(struct page *page)
-{
-	return atomic_read(&page->_mapcount) == PAGE_BUDDY_MAPCOUNT_VALUE;
+#define PAGE_TYPE_BASE	0xf0000000
+/* Reserve		0x0000007f to catch underflows of page_mapcount */
+#define PG_buddy	0x00000080
+#define PG_balloon	0x00000100
+#define PG_table	0x00000200
+
+#define PageType(page, flag)						\
+	((page->page_type & (PAGE_TYPE_BASE | flag)) == PAGE_TYPE_BASE)
+
+#define PAGE_TYPE_OPS(uname, lname)					\
+static __always_inline int Page##uname(struct page *page)		\
+{									\
+	return PageType(page, PG_##lname);				\
+}									\
+static __always_inline void __SetPage##uname(struct page *page)		\
+{									\
+	VM_BUG_ON_PAGE(!PageType(page, 0), page);			\
+	page->page_type &= ~PG_##lname;					\
+}									\
+static __always_inline void __ClearPage##uname(struct page *page)	\
+{									\
+	VM_BUG_ON_PAGE(!Page##uname(page), page);			\
+	page->page_type |= PG_##lname;					\
 }
 
-static inline void __SetPageBuddy(struct page *page)
-{
-	VM_BUG_ON_PAGE(atomic_read(&page->_mapcount) != -1, page);
-	atomic_set(&page->_mapcount, PAGE_BUDDY_MAPCOUNT_VALUE);
-}
+/*
+ * PageBuddy() indicates that the page is free and in the buddy system
+ * (see mm/page_alloc.c).
+ */
+PAGE_TYPE_OPS(Buddy, buddy)
 
-static inline void __ClearPageBuddy(struct page *page)
-{
-	VM_BUG_ON_PAGE(!PageBuddy(page), page);
-	atomic_set(&page->_mapcount, -1);
-}
+/*
+ * PageBalloon() is true for pages that are on the balloon page list
+ * (see mm/balloon_compaction.c).
+ */
+PAGE_TYPE_OPS(Balloon, balloon)
 
-#define PAGE_BALLOON_MAPCOUNT_VALUE (-256)
-
-static inline int PageBalloon(struct page *page)
-{
-	return atomic_read(&page->_mapcount) == PAGE_BALLOON_MAPCOUNT_VALUE;
-}
-
-static inline void __SetPageBalloon(struct page *page)
-{
-	VM_BUG_ON_PAGE(atomic_read(&page->_mapcount) != -1, page);
-	atomic_set(&page->_mapcount, PAGE_BALLOON_MAPCOUNT_VALUE);
-}
-
-static inline void __ClearPageBalloon(struct page *page)
-{
-	VM_BUG_ON_PAGE(!PageBalloon(page), page);
-	atomic_set(&page->_mapcount, -1);
-}
+/*
+ * Marks pages in use as page tables.
+ */
+PAGE_TYPE_OPS(Table, table)
 
 /*
  * If network-based swap is enabled, sl*b must keep track of whether pages
