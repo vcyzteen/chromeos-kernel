@@ -436,13 +436,11 @@ static ssize_t hci_le_splitter_sysfs_enabled_store(struct device *dev,
 		return -EINVAL;
 
 	mutex_lock(&hci_state_lock);
-	if (splitter_enable_state == SPLITTER_STATE_NOT_SET) {
+	if (splitter_enable_state == SPLITTER_STATE_NOT_SET)
 		splitter_enable_state =
 			set ? SPLITTER_STATE_ENABLED : SPLITTER_STATE_DISABLED;
-		pr_info("LE splitter set to %s\n", set ? "ON" : "OFF");
-	} else {
+	else
 		ret = -EPERM;
-	}
 	mutex_unlock(&hci_state_lock);
 
 	return ret;
