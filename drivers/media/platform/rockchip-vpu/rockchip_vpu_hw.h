@@ -211,7 +211,7 @@ struct rockchip_vpu_vp9d_last_info {
 	s16 feature_data[8][4];
 	u8 feature_mask[8];
 	dma_addr_t mv_base_addr;
-	bool last_segid_flag;
+	bool segmap_idx;
 };
 
 struct rockchip_vpu_vp9d_counts {
