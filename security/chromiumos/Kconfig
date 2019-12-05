@@ -48,7 +48,7 @@ config SECURITY_CHROMIUMOS_READONLY_PROC_SELF_MEM
 
 config INIT_STACK_ALL
 	bool "0xAA-init everything on the stack (strongest)"
-	default y
+	default n
 	help
 	  Initializes everything on the stack with a 0xAA
 	  pattern. This is intended to eliminate all classes
