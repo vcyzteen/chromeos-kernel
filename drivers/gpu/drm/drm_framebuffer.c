@@ -494,8 +494,8 @@ int drm_mode_getfb(struct drm_device *dev,
  * Returns:
  * Zero on success, negative errno on failure.
  */
-int drm_mode_getfb2(struct drm_device *dev,
-		   void *data, struct drm_file *file_priv)
+int drm_mode_getfb2_ioctl(struct drm_device *dev,
+			  void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_fb_cmd2 *r = data;
 	struct drm_framebuffer *fb;
@@ -522,7 +522,7 @@ int drm_mode_getfb2(struct drm_device *dev,
 	if (dev->mode_config.allow_fb_modifiers)
 		r->flags |= DRM_MODE_FB_MODIFIERS;
 
-	for (i = 0; i < ARRAY_SIZE(r->handles); ++i) {
+	for (i = 0; i < ARRAY_SIZE(r->handles); i++) {
 		r->handles[i] = 0;
 		r->pitches[i] = 0;
 		r->offsets[i] = 0;
@@ -534,9 +534,21 @@ int drm_mode_getfb2(struct drm_device *dev,
 		r->offsets[i] = fb->offsets[i];
 		if (dev->mode_config.allow_fb_modifiers)
 			r->modifier[i] = fb->modifier;
+	}
 
-		/* Use the same handle for all extra planes
-		 */
+	/* GET_FB2() is an unprivileged ioctl so we must not return a
+	 * buffer-handle to non master/root processes! To match GET_FB()
+	 * just return invalid handles (0) for non masters/root
+	 * rather than making GET_FB2() privileged.
+	 */
+	if (!drm_is_current_master(file_priv) && !capable(CAP_SYS_ADMIN) &&
+	    !drm_is_control_client(file_priv)) {
+		ret = 0;
+		goto out;
+	}
+
+	for (i = 0; i < fb->format->num_planes; i++) {
+		/* Use the same handle for all extra planes */
 		if (i > 0) {
 			r->handles[i] = r->handles[0];
 			continue;
@@ -551,6 +563,7 @@ int drm_mode_getfb2(struct drm_device *dev,
 		if (ret != 0)
 			goto out;
 	}
+
 out:
 	if (ret != 0) {
 		/* Delete any previously-created handles on failure. */
@@ -573,7 +586,6 @@ out:
 	drm_framebuffer_unreference(fb);
 	return ret;
 }
-
 
 /**
  * drm_mode_dirtyfb_ioctl - flush frontbuffer rendering on an FB
