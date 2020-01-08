@@ -36,4 +36,6 @@ source "drivers/staging/media/lirc/Kconfig"
 
 source "drivers/staging/media/ipu3/Kconfig"
 
+source "drivers/staging/media/phy-rockchip-dphy-rx0/Kconfig"
+
 endif
