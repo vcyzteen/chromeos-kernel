@@ -2158,8 +2158,8 @@ static void binder_transaction(struct binder_proc *proc,
 				goto err_bad_offset;
 			}
 			if (copy_from_user(sg_bufp,
-					(const void __user *)(uintptr_t)
-					bp->buffer, bp->length)) {
+					   (const void __user *)(uintptr_t)
+					   bp->buffer, bp->length)) {
 				binder_user_error("%d:%d got transaction with invalid offsets ptr\n",
 						  proc->pid, thread->pid);
 				return_error = BR_FAILED_REPLY;
@@ -3139,24 +3139,6 @@ static int binder_free_thread(struct binder_proc *proc,
 	return active_transactions;
 }
 
-static int binder_free_current_thread(struct binder_proc *proc)
-{
-	struct binder_thread *thread;
-
-	binder_lock(__func__);
-
-	thread = binder_get_thread(proc, false);
-	if (thread) {
-		binder_debug(BINDER_DEBUG_THREADS, "%d:%d exit\n",
-			     proc->pid, thread->pid);
-		binder_free_thread(proc, thread);
-	}
-
-	binder_unlock(__func__);
-
-	return 0;
-}
-
 static unsigned int binder_poll(struct file *filp,
 				struct poll_table_struct *wait)
 {
@@ -3195,28 +3177,24 @@ static unsigned int binder_poll(struct file *filp,
 	return 0;
 }
 
-static int binder_ioctl_write_read(struct binder_proc *proc,
-				   void __user *ubuf, unsigned int size,
-				   bool non_block)
+static int binder_ioctl_write_read(struct file *filp,
+				unsigned int cmd, unsigned long arg,
+				struct binder_thread *thread)
 {
-	struct binder_thread *thread;
-	struct binder_write_read bwr;
 	int ret = 0;
+	struct binder_proc *proc = filp->private_data;
+	unsigned int size = _IOC_SIZE(cmd);
+	void __user *ubuf = (void __user *)arg;
+	struct binder_write_read bwr;
 
-	if (size != sizeof(struct binder_write_read))
-		return -EINVAL;
-
-	if (copy_from_user(&bwr, ubuf, sizeof(bwr)))
-		return -EFAULT;
-
-	binder_lock(__func__);
-
-	thread = binder_get_thread(proc, true);
-	if (!thread) {
-		ret = -ENOMEM;
+	if (size != sizeof(struct binder_write_read)) {
+		ret = -EINVAL;
 		goto out;
 	}
-
+	if (copy_from_user(&bwr, ubuf, sizeof(bwr))) {
+		ret = -EFAULT;
+		goto out;
+	}
 	binder_debug(BINDER_DEBUG_READ_WRITE,
 		     "%d:%d write %lld at %016llx, read %lld at %016llx\n",
 		     proc->pid, thread->pid,
@@ -3240,7 +3218,7 @@ static int binder_ioctl_write_read(struct binder_proc *proc,
 		ret = binder_thread_read(proc, thread, bwr.read_buffer,
 					 bwr.read_size,
 					 &bwr.read_consumed,
-					 non_block);
+					 filp->f_flags & O_NONBLOCK);
 		trace_binder_read_done(ret);
 		if (!list_empty(&proc->todo))
 			wake_up_interruptible(&proc->wait);
@@ -3259,20 +3237,17 @@ static int binder_ioctl_write_read(struct binder_proc *proc,
 		ret = -EFAULT;
 		goto out;
 	}
-
 out:
-	binder_unlock(__func__);
 	return ret;
 }
 
-static int binder_ioctl_set_ctx_mgr(struct binder_proc *proc)
+static int binder_ioctl_set_ctx_mgr(struct file *filp)
 {
 	int ret = 0;
+	struct binder_proc *proc = filp->private_data;
 	struct binder_context *context = proc->context;
 
 	kuid_t curr_euid = current_euid();
-
-	binder_lock(__func__);
 
 	if (context->binder_context_mgr_node) {
 		pr_err("BINDER_SET_CONTEXT_MGR already set\n");
@@ -3304,7 +3279,6 @@ static int binder_ioctl_set_ctx_mgr(struct binder_proc *proc)
 	context->binder_context_mgr_node->has_strong_ref = 1;
 	context->binder_context_mgr_node->has_weak_ref = 1;
 out:
-	binder_unlock(__func__);
 	return ret;
 }
 
@@ -3312,6 +3286,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;
 	struct binder_proc *proc = filp->private_data;
+	struct binder_thread *thread;
 	unsigned int size = _IOC_SIZE(cmd);
 	void __user *ubuf = (void __user *)arg;
 
@@ -3322,51 +3297,63 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	ret = wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret)
+		goto err_unlocked;
+
+	binder_lock(__func__);
+	thread = binder_get_thread(proc, true);
+	if (thread == NULL) {
+		ret = -ENOMEM;
 		goto err;
+	}
 
 	switch (cmd) {
 	case BINDER_WRITE_READ:
-		ret = binder_ioctl_write_read(proc, ubuf, size,
-					      filp->f_flags & O_NONBLOCK);
+		ret = binder_ioctl_write_read(filp, cmd, arg, thread);
+		if (ret)
+			goto err;
 		break;
-	case BINDER_SET_MAX_THREADS: {
-		int max_threads;
-
-		ret = get_user(max_threads, (int __user *)ubuf) ? -EINVAL : 0;
-		if (!ret) {
-			binder_lock(__func__);
-			proc->max_threads = max_threads;
-			binder_unlock(__func__);
+	case BINDER_SET_MAX_THREADS:
+		if (copy_from_user(&proc->max_threads, ubuf, sizeof(proc->max_threads))) {
+			ret = -EINVAL;
+			goto err;
 		}
 		break;
-	}
 	case BINDER_SET_CONTEXT_MGR:
-		ret = binder_ioctl_set_ctx_mgr(proc);
+		ret = binder_ioctl_set_ctx_mgr(filp);
+		if (ret)
+			goto err;
 		break;
 	case BINDER_THREAD_EXIT:
-		ret = binder_free_current_thread(proc);
+		binder_debug(BINDER_DEBUG_THREADS, "%d:%d exit\n",
+			     proc->pid, thread->pid);
+		binder_free_thread(proc, thread);
+		thread = NULL;
 		break;
 	case BINDER_VERSION: {
 		struct binder_version __user *ver = ubuf;
 
-		if (size != sizeof(struct binder_version))
+		if (size != sizeof(struct binder_version)) {
 			ret = -EINVAL;
-		else if (put_user(BINDER_CURRENT_PROTOCOL_VERSION,
-				  &ver->protocol_version))
+			goto err;
+		}
+		if (put_user(BINDER_CURRENT_PROTOCOL_VERSION,
+			     &ver->protocol_version)) {
 			ret = -EINVAL;
-		else
-			ret = 0;
+			goto err;
+		}
 		break;
 	}
 	default:
 		ret = -EINVAL;
-		break;
+		goto err;
 	}
-
+	ret = 0;
+err:
+	binder_unlock(__func__);
 	wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret && ret != -ERESTARTSYS)
 		pr_info("%d:%d ioctl %x %lx returned %d\n", proc->pid, current->pid, cmd, arg, ret);
-err:
+err_unlocked:
 	trace_binder_ioctl_done(ret);
 	return ret;
 }
