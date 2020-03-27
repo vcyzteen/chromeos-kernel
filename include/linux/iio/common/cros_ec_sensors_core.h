@@ -19,6 +19,8 @@
 #include <linux/iio/iio.h>
 #include <linux/irqreturn.h>
 #include <linux/mfd/cros_ec.h>
+#include <linux/platform_device.h>
+#include <linux/platform_data/cros_ec_sensorhub.h>
 
 enum {
 	X,
@@ -42,6 +44,8 @@ enum {
  * minimum sampling period to use when device is suspending.
  */
 #define CROS_EC_MIN_SUSPEND_SAMPLING_FREQUENCY 1000  /* 1 second */
+
+typedef irqreturn_t (*cros_ec_sensors_capture_t)(int irq, void *p);
 
 /*
  * Function to read the sensor data.
@@ -110,8 +114,9 @@ struct cros_ec_sensors_core_state {
 
 /* Basic initialization of the core structure. */
 int cros_ec_sensors_core_init(struct platform_device *pdev,
-			      struct iio_dev *indio_dev,
-			      bool physical_device);
+			      struct iio_dev *indio_dev, bool physical_device,
+			      cros_ec_sensors_capture_t trigger_capture,
+			      cros_ec_sensorhub_push_data_cb_t push_data);
 
 /*
  * cros_ec_sensors_capture - the trigger handler function
@@ -125,6 +130,9 @@ int cros_ec_sensors_core_init(struct platform_device *pdev,
  * the associated buffer.
  */
 irqreturn_t cros_ec_sensors_capture(int irq, void *p);
+int cros_ec_sensors_push_data(struct iio_dev *indio_dev,
+			      s16 *data,
+			      s64 timestamp);
 
 
 /*
