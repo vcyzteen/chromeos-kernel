@@ -96,6 +96,9 @@ struct cros_ec_sensors_core_state {
 	/* Pointer to function used for accessing sensors values. */
 	cros_ec_sensors_read_t *read_ec_sensors_data;
 
+	/* Size of the EC sensor FIFO. */
+	u32 fifo_max_event_count;
+
 	/* Table of known available frequencies : 0, Min and Max in mHz */
 	int frequencies[3];
 
