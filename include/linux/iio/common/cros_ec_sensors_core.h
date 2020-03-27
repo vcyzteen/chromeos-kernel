@@ -100,7 +100,7 @@ struct cros_ec_sensors_core_state {
 	u32 fifo_max_event_count;
 
 	/* Table of known available frequencies : 0, Min and Max in mHz */
-	int frequencies[3];
+	int frequencies[6];
 
 	/* Saved ranage if modified */
 	bool range_updated;
