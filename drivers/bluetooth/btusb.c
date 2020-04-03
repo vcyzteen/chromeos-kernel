@@ -2272,7 +2272,7 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	if (ver.fw_variant == 0x23) {
 		clear_bit(BTUSB_BOOTLOADER, &data->flags);
 		btintel_check_bdaddr(hdev);
-		return 0;
+		goto finish;
 	}
 
 	/* If the device is not in bootloader mode, then the only possible
@@ -2506,24 +2506,6 @@ done:
 	 */
 	btintel_load_ddc_config(hdev, fwname);
 
-	/* All Intel controllers that support the Microsoft vendor
-	 * extension are using 0xFC1E for VsMsftOpCode.
-	 */
-	switch (ver.hw_variant) {
-	case 0x12:	/* ThP */
-		hci_set_msft_opcode(hdev, 0xFC1E);
-		break;
-	}
-
-	/* Set the event mask for Intel specific vendor events. This enables
-	 * a few extra events that are useful during general operation. It
-	 * does not enable any debugging related events.
-	 *
-	 * The device will function correctly without these events enabled
-	 * and thus no need to fail the setup.
-	 */
-	btintel_set_event_mask(hdev, false);
-
 	/* As the Intel bluetooth controller has now booted in operational
 	 * mode, re-program the URBs for BULK IN endpoint
 	 */
@@ -2542,7 +2524,25 @@ done:
 		return err;
 
 	btintel_version_info(hdev, &ver);
-	bt_dev_info(hdev, "Setup complete");
+
+finish:
+	/* All Intel controllers that support the Microsoft vendor
+	 * extension are using 0xFC1E for VsMsftOpCode.
+	 */
+	switch (ver.hw_variant) {
+	case 0x12:	/* ThP */
+		hci_set_msft_opcode(hdev, 0xFC1E);
+		break;
+	}
+
+	/* Set the event mask for Intel specific vendor events. This enables
+	 * a few extra events that are useful during general operation. It
+	 * does not enable any debugging related events.
+	 *
+	 * The device will function correctly without these events enabled
+	 * and thus no need to fail the setup.
+	 */
+	btintel_set_event_mask(hdev, false);
 
 	return 0;
 }
