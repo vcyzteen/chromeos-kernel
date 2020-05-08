@@ -50,6 +50,7 @@
 #include "i915_trace.h"
 #include "i915_vgpu.h"
 #include "intel_drv.h"
+#include "intel_uc.h"
 
 static struct drm_driver driver;
 
@@ -96,7 +97,13 @@ __i915_printk(struct drm_i915_private *dev_priv, const char *level,
 		   __builtin_return_address(0), &vaf);
 
 	if (is_error && !shown_bug_once) {
-		dev_notice(kdev, "%s", FDO_BUG_MSG);
+		/*
+		 * Ask the user to file a bug report for the error, except
+		 * if they may have caused the bug by fiddling with unsafe
+		 * module parameters.
+		 */
+		if (!test_taint(TAINT_USER))
+			dev_notice(kdev, "%s", FDO_BUG_MSG);
 		shown_bug_once = true;
 	}
 
@@ -311,6 +318,11 @@ static int i915_getparam(struct drm_device *dev, void *data,
 		break;
 	case I915_PARAM_MIN_EU_IN_POOL:
 		value = INTEL_INFO(dev_priv)->min_eu_in_pool;
+		break;
+	case I915_PARAM_HUC_STATUS:
+		intel_runtime_pm_get(dev_priv);
+		value = I915_READ(HUC_STATUS2) & HUC_FW_VERIFIED;
+		intel_runtime_pm_put(dev_priv);
 		break;
 	case I915_PARAM_MMAP_GTT_VERSION:
 		/* Though we've started our numbering from 1, and so class all
@@ -596,7 +608,7 @@ static int i915_load_modeset_init(struct drm_device *dev)
 	if (ret)
 		goto cleanup_irq;
 
-	intel_guc_init(dev_priv);
+	intel_uc_init_fw(dev_priv);
 
 	ret = i915_gem_init(dev_priv);
 	if (ret)
@@ -627,6 +639,7 @@ cleanup_gem:
 	i915_gem_fini(dev_priv);
 cleanup_irq:
 	intel_guc_fini(dev_priv);
+	intel_huc_fini(dev_priv);
 	drm_irq_uninstall(dev);
 	intel_teardown_gmbus(dev_priv);
 cleanup_csr:
@@ -827,6 +840,9 @@ static int i915_driver_init_early(struct drm_i915_private *dev_priv,
 	if (ret)
 		return ret;
 
+	intel_uc_init_early(dev_priv);
+	i915_memcpy_init_early(dev_priv);
+
 	ret = i915_workqueues_init(dev_priv);
 	if (ret < 0)
 		goto err_engines;
@@ -972,7 +988,9 @@ static void intel_sanitize_options(struct drm_i915_private *dev_priv)
 	DRM_DEBUG_DRIVER("ppgtt mode: %i\n", i915.enable_ppgtt);
 
 	i915.semaphores = intel_sanitize_semaphores(dev_priv, i915.semaphores);
-	DRM_DEBUG_DRIVER("use GPU sempahores? %s\n", yesno(i915.semaphores));
+	DRM_DEBUG_DRIVER("use GPU semaphores? %s\n", yesno(i915.semaphores));
+
+	intel_uc_sanitize_options(dev_priv);
 }
 
 /**
@@ -1123,6 +1141,7 @@ static void i915_driver_register(struct drm_i915_private *dev_priv)
 	/* Reveal our presence to userspace */
 	if (drm_dev_register(dev, 0) == 0) {
 		i915_debugfs_register(dev_priv);
+		i915_guc_log_register(dev_priv);
 		i915_setup_sysfs(dev_priv);
 
 		/* Depends on sysfs having been initialized */
@@ -1163,9 +1182,10 @@ static void i915_driver_unregister(struct drm_i915_private *dev_priv)
 	acpi_video_unregister();
 	intel_opregion_unregister(dev_priv);
 
-	i915_teardown_sysfs(dev_priv);
 	i915_perf_unregister(dev_priv);
 
+	i915_teardown_sysfs(dev_priv);
+	i915_guc_log_unregister(dev_priv);
 	i915_debugfs_unregister(dev_priv);
 	drm_dev_unregister(&dev_priv->drm);
 
@@ -1342,6 +1362,7 @@ void i915_driver_unload(struct drm_device *dev)
 	drain_workqueue(dev_priv->wq);
 
 	intel_guc_fini(dev_priv);
+	intel_huc_fini(dev_priv);
 	i915_gem_fini(dev_priv);
 	intel_fbc_cleanup_cfb(dev_priv);
 
@@ -1452,8 +1473,6 @@ static int i915_drm_suspend(struct drm_device *dev)
 			"GEM idle failed, resume might fail\n");
 		goto out;
 	}
-
-	intel_guc_suspend(dev_priv);
 
 	intel_display_suspend(dev);
 

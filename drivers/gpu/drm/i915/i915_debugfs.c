@@ -2358,10 +2358,42 @@ static int i915_llc(struct seq_file *m, void *data)
 	return 0;
 }
 
+static int i915_huc_load_status_info(struct seq_file *m, void *data)
+{
+	struct drm_i915_private *dev_priv = node_to_i915(m->private);
+	struct intel_uc_fw *huc_fw = &dev_priv->huc.fw;
+
+	if (!HAS_HUC_UCODE(dev_priv))
+		return 0;
+
+	seq_puts(m, "HuC firmware status:\n");
+	seq_printf(m, "\tpath: %s\n", huc_fw->path);
+	seq_printf(m, "\tfetch: %s\n",
+		intel_uc_fw_status_repr(huc_fw->fetch_status));
+	seq_printf(m, "\tload: %s\n",
+		intel_uc_fw_status_repr(huc_fw->load_status));
+	seq_printf(m, "\tversion wanted: %d.%d\n",
+		huc_fw->major_ver_wanted, huc_fw->minor_ver_wanted);
+	seq_printf(m, "\tversion found: %d.%d\n",
+		huc_fw->major_ver_found, huc_fw->minor_ver_found);
+	seq_printf(m, "\theader: offset is %d; size = %d\n",
+		huc_fw->header_offset, huc_fw->header_size);
+	seq_printf(m, "\tuCode: offset is %d; size = %d\n",
+		huc_fw->ucode_offset, huc_fw->ucode_size);
+	seq_printf(m, "\tRSA: offset is %d; size = %d\n",
+		huc_fw->rsa_offset, huc_fw->rsa_size);
+
+	intel_runtime_pm_get(dev_priv);
+	seq_printf(m, "\nHuC status 0x%08x:\n", I915_READ(HUC_STATUS2));
+	intel_runtime_pm_put(dev_priv);
+
+	return 0;
+}
+
 static int i915_guc_load_status_info(struct seq_file *m, void *data)
 {
 	struct drm_i915_private *dev_priv = node_to_i915(m->private);
-	struct intel_guc_fw *guc_fw = &dev_priv->guc.guc_fw;
+	struct intel_uc_fw *guc_fw = &dev_priv->guc.fw;
 	u32 tmp, i;
 
 	if (!HAS_GUC_UCODE(dev_priv))
@@ -2369,21 +2401,23 @@ static int i915_guc_load_status_info(struct seq_file *m, void *data)
 
 	seq_printf(m, "GuC firmware status:\n");
 	seq_printf(m, "\tpath: %s\n",
-		guc_fw->guc_fw_path);
+		guc_fw->path);
 	seq_printf(m, "\tfetch: %s\n",
-		intel_guc_fw_status_repr(guc_fw->guc_fw_fetch_status));
+		intel_uc_fw_status_repr(guc_fw->fetch_status));
 	seq_printf(m, "\tload: %s\n",
-		intel_guc_fw_status_repr(guc_fw->guc_fw_load_status));
+		intel_uc_fw_status_repr(guc_fw->load_status));
 	seq_printf(m, "\tversion wanted: %d.%d\n",
-		guc_fw->guc_fw_major_wanted, guc_fw->guc_fw_minor_wanted);
+		guc_fw->major_ver_wanted, guc_fw->minor_ver_wanted);
 	seq_printf(m, "\tversion found: %d.%d\n",
-		guc_fw->guc_fw_major_found, guc_fw->guc_fw_minor_found);
+		guc_fw->major_ver_found, guc_fw->minor_ver_found);
 	seq_printf(m, "\theader: offset is %d; size = %d\n",
 		guc_fw->header_offset, guc_fw->header_size);
 	seq_printf(m, "\tuCode: offset is %d; size = %d\n",
 		guc_fw->ucode_offset, guc_fw->ucode_size);
 	seq_printf(m, "\tRSA: offset is %d; size = %d\n",
 		guc_fw->rsa_offset, guc_fw->rsa_size);
+
+	intel_runtime_pm_get(dev_priv);
 
 	tmp = I915_READ(GUC_STATUS);
 
@@ -2398,7 +2432,35 @@ static int i915_guc_load_status_info(struct seq_file *m, void *data)
 	for (i = 0; i < 16; i++)
 		seq_printf(m, "\t%2d: \t0x%x\n", i, I915_READ(SOFT_SCRATCH(i)));
 
+	intel_runtime_pm_put(dev_priv);
+
 	return 0;
+}
+
+static void i915_guc_log_info(struct seq_file *m,
+			      struct drm_i915_private *dev_priv)
+{
+	struct intel_guc *guc = &dev_priv->guc;
+
+	seq_puts(m, "\nGuC logging stats:\n");
+
+	seq_printf(m, "\tISR:   flush count %10u, overflow count %10u\n",
+		   guc->log.flush_count[GUC_ISR_LOG_BUFFER],
+		   guc->log.total_overflow_count[GUC_ISR_LOG_BUFFER]);
+
+	seq_printf(m, "\tDPC:   flush count %10u, overflow count %10u\n",
+		   guc->log.flush_count[GUC_DPC_LOG_BUFFER],
+		   guc->log.total_overflow_count[GUC_DPC_LOG_BUFFER]);
+
+	seq_printf(m, "\tCRASH: flush count %10u, overflow count %10u\n",
+		   guc->log.flush_count[GUC_CRASH_DUMP_LOG_BUFFER],
+		   guc->log.total_overflow_count[GUC_CRASH_DUMP_LOG_BUFFER]);
+
+	seq_printf(m, "\tTotal flush interrupt count: %u\n",
+		   guc->log.flush_interrupt_count);
+
+	seq_printf(m, "\tCapture miss count: %u\n",
+		   guc->log.capture_miss_count);
 }
 
 static void i915_guc_client_info(struct seq_file *m,
@@ -2412,12 +2474,11 @@ static void i915_guc_client_info(struct seq_file *m,
 	seq_printf(m, "\tPriority %d, GuC ctx index: %u, PD offset 0x%x\n",
 		client->priority, client->ctx_index, client->proc_desc_offset);
 	seq_printf(m, "\tDoorbell id %d, offset: 0x%x, cookie 0x%x\n",
-		client->doorbell_id, client->doorbell_offset, client->cookie);
+		client->doorbell_id, client->doorbell_offset, client->doorbell_cookie);
 	seq_printf(m, "\tWQ size %d, offset: 0x%x, tail %d\n",
 		client->wq_size, client->wq_offset, client->wq_tail);
 
 	seq_printf(m, "\tWork queue full: %u\n", client->no_wq_space);
-	seq_printf(m, "\tFailed to queue: %u\n", client->q_fail);
 	seq_printf(m, "\tFailed doorbell: %u\n", client->b_fail);
 	seq_printf(m, "\tLast submission result: %d\n", client->retcode);
 
@@ -2471,6 +2532,8 @@ static int i915_guc_info(struct seq_file *m, void *data)
 	seq_printf(m, "\nGuC execbuf client @ %p:\n", guc.execbuf_client);
 	i915_guc_client_info(m, dev_priv, &client);
 
+	i915_guc_log_info(m, dev_priv);
+
 	/* Add more as required ... */
 
 	return 0;
@@ -2482,10 +2545,10 @@ static int i915_guc_log_dump(struct seq_file *m, void *data)
 	struct drm_i915_gem_object *obj;
 	int i = 0, pg;
 
-	if (!dev_priv->guc.log_vma)
+	if (!dev_priv->guc.log.vma)
 		return 0;
 
-	obj = dev_priv->guc.log_vma->obj;
+	obj = dev_priv->guc.log.vma->obj;
 	for (pg = 0; pg < obj->base.size / PAGE_SIZE; pg++) {
 		u32 *log = kmap_atomic(i915_gem_object_get_page(obj, pg));
 
@@ -2501,6 +2564,44 @@ static int i915_guc_log_dump(struct seq_file *m, void *data)
 
 	return 0;
 }
+
+static int i915_guc_log_control_get(void *data, u64 *val)
+{
+	struct drm_device *dev = data;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+
+	if (!dev_priv->guc.log.vma)
+		return -EINVAL;
+
+	*val = i915.guc_log_level;
+
+	return 0;
+}
+
+static int i915_guc_log_control_set(void *data, u64 val)
+{
+	struct drm_device *dev = data;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	int ret;
+
+	if (!dev_priv->guc.log.vma)
+		return -EINVAL;
+
+	ret = mutex_lock_interruptible(&dev->struct_mutex);
+	if (ret)
+		return ret;
+
+	intel_runtime_pm_get(dev_priv);
+	ret = i915_guc_log_control(dev_priv, val);
+	intel_runtime_pm_put(dev_priv);
+
+	mutex_unlock(&dev->struct_mutex);
+	return ret;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(i915_guc_log_control_fops,
+			i915_guc_log_control_get, i915_guc_log_control_set,
+			"%lld\n");
 
 static int i915_psr_sink_status_show(struct seq_file *m, void *data)
 {
@@ -4649,6 +4750,7 @@ static const struct drm_info_list i915_debugfs_list[] = {
 	{"i915_guc_info", i915_guc_info, 0},
 	{"i915_guc_load_status", i915_guc_load_status_info, 0},
 	{"i915_guc_log_dump", i915_guc_log_dump, 0},
+	{"i915_huc_load_status", i915_huc_load_status_info, 0},
 	{"i915_frequency_info", i915_frequency_info, 0},
 	{"i915_hangcheck_info", i915_hangcheck_info, 0},
 	{"i915_drpc_info", i915_drpc_info, 0},
@@ -4706,7 +4808,8 @@ static const struct i915_debugfs_files {
 	{"i915_fbc_false_color", &i915_fbc_fc_fops},
 	{"i915_dp_test_data", &i915_displayport_test_data_fops},
 	{"i915_dp_test_type", &i915_displayport_test_type_fops},
-	{"i915_edp_psr_debug", &i915_edp_psr_debug_fops}
+	{"i915_edp_psr_debug", &i915_edp_psr_debug_fops},
+	{"i915_guc_log_control", &i915_guc_log_control_fops}
 };
 
 int i915_debugfs_register(struct drm_i915_private *dev_priv)

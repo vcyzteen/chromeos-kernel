@@ -56,7 +56,7 @@
 
 #include "intel_bios.h"
 #include "intel_dpll_mgr.h"
-#include "intel_guc.h"
+#include "intel_uc.h"
 #include "intel_lrc.h"
 #include "intel_ringbuffer.h"
 #include "intel_display.h"
@@ -1769,6 +1769,7 @@ struct drm_i915_private {
 
 	struct i915_virtual_gpu vgpu;
 
+	struct intel_huc huc;
 	struct intel_guc guc;
 
 	struct intel_csr csr;
@@ -1821,8 +1822,10 @@ struct drm_i915_private {
 		u32 de_irq_mask[I915_MAX_PIPES];
 	};
 	u32 gt_irq_mask;
-	u32 pm_irq_mask;
+	u32 pm_imr;
+	u32 pm_ier;
 	u32 pm_rps_events;
+	u32 pm_guc_events;
 	u32 pipestat_irq_mask[I915_MAX_PIPES];
 
 	struct i915_hotplug hotplug;
@@ -2175,6 +2178,11 @@ static inline struct drm_i915_private *kdev_to_i915(struct device *kdev)
 static inline struct drm_i915_private *guc_to_i915(struct intel_guc *guc)
 {
 	return container_of(guc, struct drm_i915_private, guc);
+}
+
+static inline struct drm_i915_private *huc_to_i915(struct intel_huc *huc)
+{
+	return container_of(huc, struct drm_i915_private, huc);
 }
 
 /* Simple iterator over all initialised engines */
@@ -2643,6 +2651,7 @@ intel_info(const struct drm_i915_private *dev_priv)
 #define HAS_GUC(dev_priv)	((dev_priv)->info.has_guc)
 #define HAS_GUC_UCODE(dev_priv)	(HAS_GUC(dev_priv))
 #define HAS_GUC_SCHED(dev_priv)	(HAS_GUC(dev_priv))
+#define HAS_HUC_UCODE(dev_priv)	(HAS_GUC(dev_priv))
 
 #define HAS_RESOURCE_STREAMER(dev_priv) ((dev_priv)->info.has_resource_streamer)
 
@@ -3778,6 +3787,25 @@ __i915_request_irq_complete(struct drm_i915_gem_request *req)
 
 	return false;
 }
+
+void i915_memcpy_init_early(struct drm_i915_private *dev_priv);
+bool i915_memcpy_from_wc(void *dst, const void *src, unsigned long len);
+
+/* The movntdqa instructions used for memcpy-from-wc require 16-byte alignment,
+ * as well as SSE4.1 support. i915_memcpy_from_wc() will report if it cannot
+ * perform the operation. To check beforehand, pass in the parameters to
+ * to i915_can_memcpy_from_wc() - since we only care about the low 4 bits,
+ * you only need to pass in the minor offsets, page-aligned pointers are
+ * always valid.
+ *
+ * For just checking for SSE4.1, in the foreknowledge that the future use
+ * will be correctly aligned, just use i915_has_memcpy_from_wc().
+ */
+#define i915_can_memcpy_from_wc(dst, src, len) \
+	i915_memcpy_from_wc((void *)((unsigned long)(dst) | (unsigned long)(src) | (len)), NULL, 0)
+
+#define i915_has_memcpy_from_wc() \
+	i915_memcpy_from_wc(NULL, NULL, 0)
 
 /* i915_mm.c */
 int remap_io_mapping(struct vm_area_struct *vma,
