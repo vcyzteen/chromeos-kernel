@@ -72,7 +72,7 @@ struct apex_dev {
 	struct gasket_dev *gasket_dev_ptr;
 	struct delayed_work check_temperature_work;
 	u32 adc_trip_points[3];
-	atomic_t temp_poll_interval;
+	int temp_poll_interval;
 };
 
 /* Enumeration of the supported sysfs entries. */
@@ -720,7 +720,7 @@ static ssize_t sysfs_show(struct device *device, struct device_attribute *attr,
 		break;
 	case ATTR_TEMP_POLL_INTERVAL:
 		ret = scnprintf(buf, PAGE_SIZE, "%i\n",
-				atomic_read(&apex_dev->temp_poll_interval));
+				apex_dev->temp_poll_interval);
 		break;
 	default:
 		dev_dbg(gasket_dev->dev, "Unknown attribute: %s\n",
@@ -796,30 +796,47 @@ static ssize_t sysfs_store(struct device *device, struct device_attribute *attr,
 	case ATTR_TEMP_TRIP0:
 		value = millic_to_adc(value);
 		/* Note: that adc values should be in descending order */
-		if (value >= apex_dev->adc_trip_points[1]) {
+		mutex_lock(&gasket_dev->mutex);
+		if (value >= apex_dev->adc_trip_points[1])
 			apex_dev->adc_trip_points[0] = value;
-		} else ret = -EINVAL;
+		else
+			ret = -EINVAL;
+		mutex_unlock(&gasket_dev->mutex);
 		break;
 	case ATTR_TEMP_TRIP1:
 		value = millic_to_adc(value);
+		mutex_lock(&gasket_dev->mutex);
 		if (value <= apex_dev->adc_trip_points[0] &&
-		    value >= apex_dev->adc_trip_points[2]) {
+		    value >= apex_dev->adc_trip_points[2])
 			apex_dev->adc_trip_points[1] = value;
-		} else ret = -EINVAL;
+		else
+			ret = -EINVAL;
+		mutex_unlock(&gasket_dev->mutex);
 		break;
 	case ATTR_TEMP_TRIP2:
 		value = millic_to_adc(value);
-		if (value <= apex_dev->adc_trip_points[1]) {
+		mutex_lock(&gasket_dev->mutex);
+		if (value <= apex_dev->adc_trip_points[1])
 			apex_dev->adc_trip_points[2] = value;
-		} else ret = -EINVAL;
+		else
+			ret = -EINVAL;
+		mutex_unlock(&gasket_dev->mutex);
 		break;
 	case ATTR_TEMP_POLL_INTERVAL:
-		cancel_delayed_work_sync(&apex_dev->check_temperature_work);
-		atomic_set(&apex_dev->temp_poll_interval, value);
+		mutex_lock(&gasket_dev->mutex);
+		/*
+		 * If the worker is running, it is waiting for the mutex we are
+		 * holding here, so we can not wait for it to finish. Just
+		 * cancel future pending work if temp_poll_interval is set
+		 * to <= 0 and let a currently running worker do its job.
+		 */
+		apex_dev->temp_poll_interval = value;
 		if (value > 0)
 			schedule_delayed_work(&apex_dev->check_temperature_work,
 					      msecs_to_jiffies(value));
-
+		else
+			cancel_delayed_work(&apex_dev->check_temperature_work);
+		mutex_unlock(&gasket_dev->mutex);
 		break;
 	default:
 		dev_dbg(gasket_dev->dev, "Unknown attribute: %s\n",
@@ -877,7 +894,7 @@ static void apply_module_params(struct apex_dev *apex_dev) {
 	apex_dev->adc_trip_points[0] = millic_to_adc(trip_point0_temp);
 	apex_dev->adc_trip_points[1] = millic_to_adc(trip_point1_temp);
 	apex_dev->adc_trip_points[2] = millic_to_adc(trip_point2_temp);
-	atomic_set(&apex_dev->temp_poll_interval, temp_poll_interval);
+	apex_dev->temp_poll_interval = temp_poll_interval;
 
 	gasket_read_modify_write_32(apex_dev->gasket_dev_ptr, APEX_BAR_INDEX,
 				    APEX_BAR2_REG_OMC0_D4,
@@ -899,7 +916,7 @@ static void apply_module_params(struct apex_dev *apex_dev) {
 }
 
 static void check_temperature_work_handler(struct work_struct *work) {
-	int i, temp_poll_interval;
+	int i;
 	u32 adc_temp, clk_div, tmp;
 	const u32 mask = ((1 << 2) - 1) << 28;
 	struct apex_dev *apex_dev =
@@ -935,12 +952,11 @@ static void check_temperature_work_handler(struct work_struct *work) {
 			 i == -1 ? "not " : "");
 	}
 
-	mutex_unlock(&gasket_dev->mutex);
-
-	temp_poll_interval = atomic_read(&apex_dev->temp_poll_interval);
-	if (temp_poll_interval > 0)
+	if (apex_dev->temp_poll_interval > 0)
 		schedule_delayed_work(&apex_dev->check_temperature_work,
-				      msecs_to_jiffies(temp_poll_interval));
+			msecs_to_jiffies(apex_dev->temp_poll_interval));
+
+	mutex_unlock(&gasket_dev->mutex);
 }
 
 /* On device open, perform a core reinit reset. */
@@ -963,7 +979,7 @@ DECLARE_PCI_FIXUP_CLASS_HEADER(APEX_PCI_VENDOR_ID, APEX_PCI_DEVICE_ID,
 static int apex_pci_probe(struct pci_dev *pci_dev,
 			  const struct pci_device_id *id)
 {
-	int ret, temp_poll_interval;
+	int ret;
 	ulong page_table_ready, msix_table_ready;
 	int retries = 0;
 	struct gasket_dev *gasket_dev;
@@ -1057,10 +1073,9 @@ static int apex_pci_probe(struct pci_dev *pci_dev,
 		apex_enter_reset(gasket_dev);
 
 	/* Enable thermal polling */
-	temp_poll_interval = atomic_read(&apex_dev->temp_poll_interval);
-	if (temp_poll_interval > 0)
+	if (apex_dev->temp_poll_interval > 0)
 		schedule_delayed_work(&apex_dev->check_temperature_work,
-				      msecs_to_jiffies(temp_poll_interval));
+				      msecs_to_jiffies(apex_dev->temp_poll_interval));
 	return 0;
 
 remove_device:
