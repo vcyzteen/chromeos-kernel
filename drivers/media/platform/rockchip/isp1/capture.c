@@ -1179,7 +1179,15 @@ static void rkisp1_buf_queue(struct vb2_buffer *vb)
 
 	memset(ispbuf->buff_addr, 0, sizeof(ispbuf->buff_addr));
 	for (i = 0; i < isp_fmt->mplanes; i++)
-		ispbuf->buff_addr[i] = vb2_dma_contig_plane_dma_addr(vb, i);
+		/* TODO(crbug.com/901264): The way to pass an offset
+		 * with a DmaBuf is not defined in V4L2 specification.
+		 * This is a local hack to abuse data_offset for the
+		 * purpose. Replace it after the appropriate way is
+		 * defined in upstream.
+		 */
+		ispbuf->buff_addr[i] =
+			vb2_dma_contig_plane_dma_addr(vb, i) +
+			vb->planes[i].data_offset;
 
 	if (isp_fmt->mplanes == 1) {
 		for (i = 0; i < isp_fmt->cplanes - 1; i++) {

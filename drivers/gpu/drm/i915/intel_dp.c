@@ -100,6 +100,7 @@ static const int bxt_rates[] = { 162000, 216000, 243000, 270000,
 static const int skl_rates[] = { 162000, 216000, 270000,
 				  324000, 432000, 540000 };
 static const int default_rates[] = { 162000, 270000, 540000 };
+static const int possible_sink_rates[] = { 162000, 270000, 540000, 810000 };
 
 /**
  * intel_dp_is_edp - is the given port attached to an eDP panel (either CPU or PCH)
@@ -147,6 +148,8 @@ static int intel_dp_num_rates(u8 link_bw_code)
 		return 2;
 	case DP_LINK_BW_5_4:
 		return 3;
+	case DP_LINK_BW_8_1:
+		return 4;
 	}
 }
 
@@ -158,7 +161,7 @@ static void intel_dp_set_sink_rates(struct intel_dp *intel_dp)
 	num_rates = intel_dp_num_rates(intel_dp->dpcd[DP_MAX_LINK_RATE]);
 
 	for (i = 0; i < num_rates; i++)
-		intel_dp->sink_rates[i] = default_rates[i];
+		intel_dp->sink_rates[i] = possible_sink_rates[i];
 
 	intel_dp->num_sink_rates = num_rates;
 }

@@ -243,6 +243,8 @@ entry_SYSCALL_64_fastpath:
 	testl	$_TIF_ALLWORK_MASK, TASK_TI_flags(%r11)
 	jnz	int_ret_from_sys_call_irqs_off	/* Go to the slow path */
 
+	call	mds_user_clear_buffers
+
 	movq	RIP(%rsp), %rcx
 	movq	EFLAGS(%rsp), %r11
 	RESTORE_C_REGS_EXCEPT_RCX_R11

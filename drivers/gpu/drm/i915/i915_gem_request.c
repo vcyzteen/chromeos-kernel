@@ -419,6 +419,7 @@ void __i915_gem_request_submit(struct drm_i915_gem_request *request)
 	spin_unlock(&request->timeline->lock);
 
 	i915_sw_fence_commit(&request->execute);
+	trace_i915_gem_request_execute(request);
 }
 
 void i915_gem_request_submit(struct drm_i915_gem_request *request)
@@ -442,6 +443,7 @@ submit_notify(struct i915_sw_fence *fence, enum i915_sw_fence_notify state)
 
 	switch (state) {
 	case FENCE_COMPLETE:
+		trace_i915_gem_request_submit(request);
 		request->engine->submit_request(request);
 		break;
 
@@ -628,6 +630,9 @@ i915_gem_request_await_request(struct drm_i915_gem_request *to,
 	int ret;
 
 	GEM_BUG_ON(to == from);
+
+	if (i915_gem_request_completed(from))
+		return 0;
 
 	if (to->engine->schedule) {
 		ret = i915_priotree_add_dependency(to->i915,

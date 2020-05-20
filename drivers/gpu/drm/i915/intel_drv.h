@@ -1245,6 +1245,9 @@ void intel_check_pch_fifo_underruns(struct drm_i915_private *dev_priv);
 /* i915_irq.c */
 void gen5_enable_gt_irq(struct drm_i915_private *dev_priv, uint32_t mask);
 void gen5_disable_gt_irq(struct drm_i915_private *dev_priv, uint32_t mask);
+void gen6_reset_pm_iir(struct drm_i915_private *dev_priv, u32 mask);
+void gen6_mask_pm_irq(struct drm_i915_private *dev_priv, u32 mask);
+void gen6_unmask_pm_irq(struct drm_i915_private *dev_priv, u32 mask);
 void gen6_enable_pm_irq(struct drm_i915_private *dev_priv, uint32_t mask);
 void gen6_disable_pm_irq(struct drm_i915_private *dev_priv, uint32_t mask);
 void gen6_reset_rps_interrupts(struct drm_i915_private *dev_priv);
@@ -1267,6 +1270,9 @@ void gen8_irq_power_well_post_enable(struct drm_i915_private *dev_priv,
 				     unsigned int pipe_mask);
 void gen8_irq_power_well_pre_disable(struct drm_i915_private *dev_priv,
 				     unsigned int pipe_mask);
+void gen9_reset_guc_interrupts(struct drm_i915_private *dev_priv);
+void gen9_enable_guc_interrupts(struct drm_i915_private *dev_priv);
+void gen9_disable_guc_interrupts(struct drm_i915_private *dev_priv);
 
 /* intel_crt.c */
 void intel_crt_init(struct drm_i915_private *dev_priv);

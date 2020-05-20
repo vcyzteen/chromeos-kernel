@@ -537,7 +537,7 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 
 		if (tp->urg_data & TCP_URG_VALID)
 			mask |= POLLPRI;
-	} else if (sk->sk_state == TCP_SYN_SENT && inet_sk(sk)->defer_connect) {
+	} else if (state == TCP_SYN_SENT && inet_sk(sk)->defer_connect) {
 		/* Active TCP fastopen socket with defer_connect
 		 * Return POLLOUT so application can call write()
 		 * in order for kernel to generate SYN+data
@@ -1109,9 +1109,14 @@ static int tcp_sendmsg_fastopen(struct sock *sk, struct msghdr *msg,
 	flags = (msg->msg_flags & MSG_DONTWAIT) ? O_NONBLOCK : 0;
 	err = __inet_stream_connect(sk->sk_socket, uaddr,
 				    msg->msg_namelen, flags, 1);
-	inet->defer_connect = 0;
-	*copied = tp->fastopen_req->copied;
-	tcp_free_fastopen_req(tp);
+	/* fastopen_req could already be freed in __inet_stream_connect
+	 * if the connection times out or gets rst
+	 */
+	if (tp->fastopen_req) {
+		*copied = tp->fastopen_req->copied;
+		tcp_free_fastopen_req(tp);
+		inet->defer_connect = 0;
+	}
 	return err;
 }
 
@@ -2281,6 +2286,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->window_clamp = 0;
 	tcp_set_ca_state(sk, TCP_CA_Open);
 	tcp_clear_retrans(tp);
+	tp->total_retrans = 0;
 	inet_csk_delack_init(sk);
 	/* Initialize rcv_mss to TCP_MIN_MSS to avoid division by 0
 	 * issue in __tcp_select_window()
@@ -2292,8 +2298,14 @@ int tcp_disconnect(struct sock *sk, int flags)
 	dst_release(sk->sk_rx_dst);
 	sk->sk_rx_dst = NULL;
 	tcp_saved_syn_free(tp);
+	tp->segs_in = 0;
+	tp->segs_out = 0;
 	tp->bytes_acked = 0;
 	tp->bytes_received = 0;
+
+	/* Clean up fastopen related fields */
+	tcp_free_fastopen_req(tp);
+	inet->defer_connect = 0;
 
 	WARN_ON(inet->inet_num && !icsk->icsk_bind_hash);
 

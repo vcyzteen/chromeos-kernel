@@ -679,7 +679,8 @@ extern unsigned long devm_get_free_pages(struct device *dev,
 					 gfp_t gfp_mask, unsigned int order);
 extern void devm_free_pages(struct device *dev, unsigned long addr);
 
-void __iomem *devm_ioremap_resource(struct device *dev, struct resource *res);
+void __iomem *devm_ioremap_resource(struct device *dev,
+				    const struct resource *res);
 
 /* allows to add/remove a custom action to devres stack */
 int devm_add_action(struct device *dev, void (*action)(void *), void *data);
@@ -1056,6 +1057,11 @@ static inline void dev_pm_syscore_device(struct device *dev, bool val)
 static inline void device_lock(struct device *dev)
 {
 	mutex_lock(&dev->mutex);
+}
+
+static inline int device_lock_interruptible(struct device *dev)
+{
+	return mutex_lock_interruptible(&dev->mutex);
 }
 
 static inline int device_trylock(struct device *dev)
