@@ -12689,15 +12689,25 @@ intel_atomic_enable_hdcp(struct drm_atomic_state *old_state)
 	for_each_connector_in_state(old_state, conn, old_conn_state, i) {
 		struct intel_connector *intel_conn = to_intel_connector(conn);
 		uint64_t new, old;
+		bool noop;
 
 		if (!intel_conn->hdcp_shim)
 			continue;
 
 		old = old_conn_state->content_protection;
 		new = conn->state->content_protection;
+
+		/*
+		 * We don't need to do anything if the state hasn't changed, or
+		 * if userspace is asking for desired and we're already enabled.
+		 */
+		noop = new == old ||
+		       (new == DRM_MODE_CONTENT_PROTECTION_DESIRED &&
+		        old == DRM_MODE_CONTENT_PROTECTION_ENABLED);
+
 		if (!conn->state->crtc ||
 		    new != DRM_MODE_CONTENT_PROTECTION_DESIRED ||
-		    (new == old && old_conn_state->crtc == conn->state->crtc))
+		    (noop && old_conn_state->crtc == conn->state->crtc))
 			continue;
 
 		intel_hdcp_enable(intel_conn);
