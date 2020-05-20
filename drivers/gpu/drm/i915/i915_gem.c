@@ -427,7 +427,7 @@ i915_gem_object_wait_reservation(struct reservation_object *resv,
 			timeout = i915_gem_object_wait_fence(shared[i],
 							     flags, timeout,
 							     rps);
-			if (timeout <= 0)
+			if (timeout < 0)
 				break;
 
 			dma_fence_put(shared[i]);
@@ -440,7 +440,7 @@ i915_gem_object_wait_reservation(struct reservation_object *resv,
 		excl = reservation_object_get_excl_rcu(resv);
 	}
 
-	if (excl && timeout > 0)
+	if (excl && timeout >= 0)
 		timeout = i915_gem_object_wait_fence(excl, flags, timeout, rps);
 
 	dma_fence_put(excl);
@@ -2256,7 +2256,7 @@ i915_gem_object_put_pages_gtt(struct drm_i915_gem_object *obj,
 static void __i915_gem_object_reset_page_iter(struct drm_i915_gem_object *obj)
 {
 	struct radix_tree_iter iter;
-	void **slot;
+	void __rcu **slot;
 
 	rcu_read_lock();
 	radix_tree_for_each_slot(slot, &obj->mm.get_page.radix, &iter, 0)
@@ -3192,6 +3192,16 @@ i915_gem_wait_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 	if (args->timeout_ns > 0) {
 		args->timeout_ns -= ktime_to_ns(ktime_sub(ktime_get(), start));
 		if (args->timeout_ns < 0)
+			args->timeout_ns = 0;
+
+		/*
+		 * Apparently ktime isn't accurate enough and occasionally has a
+		 * bit of mismatch in the jiffies<->nsecs<->ktime loop. So patch
+		 * things up to make the test happy. We allow up to 1 jiffy.
+		 *
+		 * This is a regression from the timespec->ktime conversion.
+		 */
+		if (ret == -ETIME && !nsecs_to_jiffies(args->timeout_ns))
 			args->timeout_ns = 0;
 	}
 
@@ -4390,6 +4400,7 @@ int i915_gem_suspend(struct drm_i915_private *dev_priv)
 	struct drm_device *dev = &dev_priv->drm;
 	int ret;
 
+	intel_runtime_pm_get(dev_priv);
 	intel_suspend_gt_powersave(dev_priv);
 
 	mutex_lock(&dev->struct_mutex);
@@ -4404,13 +4415,13 @@ int i915_gem_suspend(struct drm_i915_private *dev_priv)
 	 */
 	ret = i915_gem_switch_to_kernel_context(dev_priv);
 	if (ret)
-		goto err;
+		goto err_unlock;
 
 	ret = i915_gem_wait_for_idle(dev_priv,
 				     I915_WAIT_INTERRUPTIBLE |
 				     I915_WAIT_LOCKED);
 	if (ret)
-		goto err;
+		goto err_unlock;
 
 	i915_gem_retire_requests(dev_priv);
 	GEM_BUG_ON(dev_priv->gt.active_requests);
@@ -4418,6 +4429,8 @@ int i915_gem_suspend(struct drm_i915_private *dev_priv)
 	assert_kernel_context_is_current(dev_priv);
 	i915_gem_context_lost(dev_priv);
 	mutex_unlock(&dev->struct_mutex);
+
+	intel_guc_suspend(dev_priv);
 
 	cancel_delayed_work_sync(&dev_priv->gpu_error.hangcheck_work);
 	cancel_delayed_work_sync(&dev_priv->gt.retire_work);
@@ -4456,11 +4469,12 @@ int i915_gem_suspend(struct drm_i915_private *dev_priv)
 	 * machine in an unusable condition.
 	 */
 	i915_gem_sanitize(dev_priv);
+	goto out_rpm_put;
 
-	return 0;
-
-err:
+err_unlock:
 	mutex_unlock(&dev->struct_mutex);
+out_rpm_put:
+	intel_runtime_pm_put(dev_priv);
 	return ret;
 }
 
@@ -4598,11 +4612,9 @@ int i915_gem_init_hw(struct drm_i915_private *dev_priv)
 	intel_mocs_init_l3cc_table(dev_priv);
 
 	/* We can't enable contexts until all firmware is loaded */
-	if (HAS_GUC(dev_priv)) {
-		ret = intel_guc_setup(dev_priv);
-		if (ret)
-			goto out;
-	}
+	ret = intel_uc_init_hw(dev_priv);
+	if (ret)
+		goto out;
 
 out:
 	intel_uncore_forcewake_put(dev_priv, FORCEWAKE_ALL);

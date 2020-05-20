@@ -5911,10 +5911,17 @@ enum {
 #define _PLANE_AUX_DIST_2_A			0x702c0
 #define _PLANE_AUX_OFFSET_1_A			0x701c4
 #define _PLANE_AUX_OFFSET_2_A			0x702c4
+#define _PLANE_COLOR_CTL_1_A			0x701CC /* GLK+ */
+#define _PLANE_COLOR_CTL_2_A			0x702CC /* GLK+ */
+#define _PLANE_COLOR_CTL_3_A			0x703CC /* GLK+ */
+#define   PLANE_COLOR_PIPE_GAMMA_ENABLE		(1 << 30)
+#define   PLANE_COLOR_PIPE_CSC_ENABLE		(1 << 23)
+#define   PLANE_COLOR_PLANE_GAMMA_DISABLE	(1 << 13)
 #define _PLANE_BUF_CFG_1_A			0x7027c
 #define _PLANE_BUF_CFG_2_A			0x7037c
 #define _PLANE_NV12_BUF_CFG_1_A		0x70278
 #define _PLANE_NV12_BUF_CFG_2_A		0x70378
+
 
 #define _PLANE_CTL_1_B				0x71180
 #define _PLANE_CTL_2_B				0x71280
@@ -6028,7 +6035,17 @@ enum {
 #define PLANE_AUX_OFFSET(pipe, plane)   \
 	_MMIO_PLANE(plane, _PLANE_AUX_OFFSET_1(pipe), _PLANE_AUX_OFFSET_2(pipe))
 
-/* SKL new cursor registers */
+#define _PLANE_COLOR_CTL_1_B			0x711CC
+#define _PLANE_COLOR_CTL_2_B			0x712CC
+#define _PLANE_COLOR_CTL_3_B			0x713CC
+#define _PLANE_COLOR_CTL_1(pipe)	\
+	_PIPE(pipe, _PLANE_COLOR_CTL_1_A, _PLANE_COLOR_CTL_1_B)
+#define _PLANE_COLOR_CTL_2(pipe)	\
+	_PIPE(pipe, _PLANE_COLOR_CTL_2_A, _PLANE_COLOR_CTL_2_B)
+#define PLANE_COLOR_CTL(pipe, plane)	\
+	_MMIO_PLANE(plane, _PLANE_COLOR_CTL_1(pipe), _PLANE_COLOR_CTL_2(pipe))
+
+#/* SKL new cursor registers */
 #define _CUR_BUF_CFG_A				0x7017c
 #define _CUR_BUF_CFG_B				0x7117c
 #define CUR_BUF_CFG(pipe)	_MMIO_PIPE(pipe, _CUR_BUF_CFG_A, _CUR_BUF_CFG_B)
@@ -6384,6 +6401,7 @@ enum {
 #define  GEN8_DE_PIPE_A_IRQ		(1<<16)
 #define  GEN8_DE_PIPE_IRQ(pipe)		(1<<(16+(pipe)))
 #define  GEN8_GT_VECS_IRQ		(1<<6)
+#define  GEN8_GT_GUC_IRQ		(1<<5)
 #define  GEN8_GT_PM_IRQ			(1<<4)
 #define  GEN8_GT_VCS2_IRQ		(1<<3)
 #define  GEN8_GT_VCS1_IRQ		(1<<2)
@@ -6394,6 +6412,16 @@ enum {
 #define GEN8_GT_IMR(which) _MMIO(0x44304 + (0x10 * (which)))
 #define GEN8_GT_IIR(which) _MMIO(0x44308 + (0x10 * (which)))
 #define GEN8_GT_IER(which) _MMIO(0x4430c + (0x10 * (which)))
+
+#define GEN9_GUC_TO_HOST_INT_EVENT	(1<<31)
+#define GEN9_GUC_EXEC_ERROR_EVENT	(1<<30)
+#define GEN9_GUC_DISPLAY_EVENT		(1<<29)
+#define GEN9_GUC_SEMA_SIGNAL_EVENT	(1<<28)
+#define GEN9_GUC_IOMMU_MSG_EVENT	(1<<27)
+#define GEN9_GUC_DB_RING_EVENT		(1<<26)
+#define GEN9_GUC_DMA_DONE_EVENT		(1<<25)
+#define GEN9_GUC_FATAL_ERROR_EVENT	(1<<24)
+#define GEN9_GUC_NOTIFICATION_EVENT	(1<<23)
 
 #define GEN8_RCS_IRQ_SHIFT 0
 #define GEN8_BCS_IRQ_SHIFT 16

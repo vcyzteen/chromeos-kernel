@@ -130,10 +130,13 @@ int cros_ec_get_next_event(struct cros_ec_device *ec_dev)
 	} __packed buf;
 	struct cros_ec_command *msg = &buf.msg;
 	struct ec_response_get_next_event_v1 *event = &buf.event;
-	const int cmd_version = ec_dev->mkbp_event_supported - 1;
+	int cmd_version = ec_dev->mkbp_event_supported - 1;
+	size_t response_size;
+	int ret;
 
 	BUILD_BUG_ON(sizeof(union ec_response_get_next_data_v1) != 16);
 
+begin:
 	memset(&buf, 0, sizeof(buf));
 
 	if (ec_dev->suspended) {
@@ -142,11 +145,23 @@ int cros_ec_get_next_event(struct cros_ec_device *ec_dev)
 	}
 
 	if (cmd_version == 0)
-		return get_next_event_xfer(ec_dev, msg, event, 0,
-				  sizeof(struct ec_response_get_next_event));
+		response_size = sizeof(struct ec_response_get_next_event);
+	else
+		response_size = sizeof(struct ec_response_get_next_event_v1);
 
-	return get_next_event_xfer(ec_dev, msg, event, cmd_version,
-				sizeof(struct ec_response_get_next_event_v1));
+	ret = get_next_event_xfer(ec_dev, msg, event, cmd_version,
+				  response_size);
+
+	/*
+	 * If the result is EC_RES_INVALID_VERSION, the EC might have
+	 * transitioned from RW to RO, so retry using an older version.
+	 */
+	if (msg->result == EC_RES_INVALID_VERSION && cmd_version > 0) {
+		cmd_version = 0;
+		goto begin;
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL(cros_ec_get_next_event);
 
@@ -289,6 +304,23 @@ static int cros_ec_sleep_event(struct cros_ec_device *ec_dev, u8 sleep_event)
 	return cros_ec_cmd_xfer(ec_dev, msg);
 }
 
+static int cros_ec_ready_event(struct notifier_block *nb,
+	unsigned long queued_during_suspend, void *_notify)
+{
+	struct cros_ec_device *ec_dev = container_of(nb, struct cros_ec_device,
+						     notifier_ready);
+	u32 host_event = cros_ec_get_host_event(ec_dev);
+
+	if (host_event & EC_HOST_EVENT_MASK(EC_HOST_EVENT_INTERFACE_READY)) {
+		mutex_lock(&ec_dev->lock);
+		cros_ec_query_all(ec_dev);
+		mutex_unlock(&ec_dev->lock);
+		return NOTIFY_OK;
+	} else {
+		return NOTIFY_DONE;
+	}
+}
+
 static struct cros_ec_dev_platform pd_p = {
 	.ec_name = CROS_EC_DEV_PD_NAME,
 	.cmd_offset = EC_CMD_PASSTHRU_OFFSET(CROS_EC_DEV_PD_INDEX),
@@ -390,6 +422,13 @@ int cros_ec_register(struct cros_ec_device *ec_dev)
 	if (err < 0)
 		dev_dbg(ec_dev->dev, "Error %d clearing sleep event to ec",
 			err);
+
+	/* Register the notifier for EC_HOST_EVENT_INTERFACE_READY event. */
+	ec_dev->notifier_ready.notifier_call = cros_ec_ready_event;
+	err = blocking_notifier_chain_register(&ec_dev->event_notifier,
+					       &ec_dev->notifier_ready);
+	if (err < 0)
+		dev_warn(ec_dev->dev, "Failed to register notifier\n");
 
 	dev_info(dev, "Chrome EC device registered\n");
 

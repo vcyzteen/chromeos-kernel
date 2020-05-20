@@ -3109,6 +3109,46 @@ static int skl_check_main_surface(struct intel_plane_state *plane_state)
 static int
 skl_check_nv12_surface(struct intel_plane_state *plane_state)
 {
+	const struct drm_framebuffer *fb = plane_state->base.fb;
+	struct drm_rect *src = &plane_state->base.src;
+	u32 src_x, src_y, src_w, src_h, hsub, vsub;
+	bool rotated = drm_rotation_90_or_270(plane_state->base.rotation);
+
+	/*
+	 * Hardware doesn't handle subpixel coordinates.
+	 * Adjust to (macro)pixel boundary, but be careful not to
+	 * increase the source viewport size, because that could
+	 * push the downscaling factor out of bounds.
+	 */
+	src_x = src->x1 >> 16;
+	src_w = drm_rect_width(src) >> 16;
+	src_y = src->y1 >> 16;
+	src_h = drm_rect_height(src) >> 16;
+
+	src->x1 = src_x << 16;
+	src->x2 = (src_x + src_w) << 16;
+	src->y1 = src_y << 16;
+	src->y2 = (src_y + src_h) << 16;
+
+	if (!rotated) {
+		hsub = fb->format->hsub;
+		vsub = fb->format->vsub;
+	} else {
+		hsub = vsub = max(fb->format->hsub, fb->format->vsub);
+	}
+
+	if (src_x % hsub || src_w % hsub) {
+		DRM_DEBUG_KMS("src x/w (%u, %u) must be a multiple of %u for %sYUV planes\n",
+			      src_x, src_w, hsub, rotated ? "rotated " : "");
+		return -EINVAL;
+	}
+
+	if (src_y % vsub || src_h % vsub) {
+		DRM_DEBUG_KMS("src y/h (%u, %u) must be a multiple of %u for %sYUV planes\n",
+			      src_y, src_h, vsub, rotated ? "rotated " : "");
+		return -EINVAL;
+	}
+
 	/* Display WA #1106 */
 	if (plane_state->base.rotation !=
 	    (DRM_REFLECT_X | DRM_ROTATE_90) &&
@@ -3626,13 +3666,21 @@ static void skylake_update_primary_plane(struct drm_plane *plane,
 	int dst_w = drm_rect_width(&plane_state->base.dst);
 	int dst_h = drm_rect_height(&plane_state->base.dst);
 
-	plane_ctl = PLANE_CTL_ENABLE |
-		    PLANE_CTL_PIPE_GAMMA_ENABLE |
-		    PLANE_CTL_PIPE_CSC_ENABLE;
+	plane_ctl = PLANE_CTL_ENABLE;
+
+	if (IS_GEMINILAKE(dev_priv)) {
+		I915_WRITE(PLANE_COLOR_CTL(pipe, plane_id),
+			   PLANE_COLOR_PIPE_GAMMA_ENABLE |
+			   PLANE_COLOR_PLANE_GAMMA_DISABLE);
+	} else {
+		plane_ctl |=
+			PLANE_CTL_PIPE_GAMMA_ENABLE |
+			PLANE_CTL_PIPE_CSC_ENABLE |
+			PLANE_CTL_PLANE_GAMMA_DISABLE;
+	}
 
 	plane_ctl |= skl_plane_ctl_format(fb->format->format);
 	plane_ctl |= skl_plane_ctl_tiling(fb->modifier);
-	plane_ctl |= PLANE_CTL_PLANE_GAMMA_DISABLE;
 	plane_ctl |= skl_plane_ctl_rotation(rotation);
 
 	/* Sizes are 0 based */
@@ -5003,7 +5051,7 @@ static int skl_update_scaler_plane(struct intel_crtc_state *crtc_state,
 		return ret;
 
 	/* check colorkey */
-	if (plane_state->ckey.flags != I915_SET_COLORKEY_NONE) {
+	if (plane_state->ckey.flags) {
 		DRM_DEBUG_KMS("[PLANE:%d:%s] scaling with color key not allowed",
 			      intel_plane->base.base.id,
 			      intel_plane->base.name);
@@ -13219,7 +13267,7 @@ intel_check_primary_plane(struct drm_plane *plane,
 
 	if (INTEL_GEN(dev_priv) >= 9) {
 		/* use scaler when colorkey is not required */
-		if (state->ckey.flags == I915_SET_COLORKEY_NONE) {
+		if (!state->ckey.flags) {
 			min_scale = 1;
 			if (state->base.fb)
 				pixel_format = state->base.fb->format->format;

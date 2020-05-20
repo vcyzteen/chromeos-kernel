@@ -19,6 +19,7 @@
 #include "irq.h"
 #include "mmu.h"
 #include "cpuid.h"
+#include "lapic.h"
 
 #include <linux/kvm_host.h>
 #include <linux/module.h>
@@ -895,7 +896,6 @@ static u64 construct_eptp(unsigned long root_hpa);
 static void kvm_cpu_vmxon(u64 addr);
 static void kvm_cpu_vmxoff(void);
 static bool vmx_xsaves_supported(void);
-static int vmx_cpu_uses_apicv(struct kvm_vcpu *vcpu);
 static int vmx_set_tss_addr(struct kvm *kvm, unsigned int addr);
 static void vmx_set_segment(struct kvm_vcpu *vcpu,
 			    struct kvm_segment *var, int seg);
@@ -903,7 +903,6 @@ static void vmx_get_segment(struct kvm_vcpu *vcpu,
 			    struct kvm_segment *var, int seg);
 static bool guest_state_valid(struct kvm_vcpu *vcpu);
 static u32 vmx_segment_access_rights(struct kvm_segment *var);
-static void vmx_sync_pir_to_irr_dummy(struct kvm_vcpu *vcpu);
 static void copy_vmcs12_to_shadow(struct vcpu_vmx *vmx);
 static void copy_shadow_to_vmcs12(struct vcpu_vmx *vmx);
 static int alloc_identity_pagetable(struct kvm *kvm);
@@ -1362,7 +1361,7 @@ static int __find_msr_index(struct vcpu_vmx *vmx, u32 msr)
 	return -1;
 }
 
-static inline void __invvpid(int ext, u16 vpid, gva_t gva)
+static inline void __invvpid(unsigned long ext, u16 vpid, gva_t gva)
 {
     struct {
 	u64 vpid : 16;
@@ -1376,7 +1375,7 @@ static inline void __invvpid(int ext, u16 vpid, gva_t gva)
 		  : : "a"(&operand), "c"(ext) : "cc", "memory");
 }
 
-static inline void __invept(int ext, u64 eptp, gpa_t gpa)
+static inline void __invept(unsigned long ext, u64 eptp, gpa_t gpa)
 {
 	struct {
 		u64 eptp, gpa;
@@ -2132,7 +2131,8 @@ static void vmx_vcpu_pi_load(struct kvm_vcpu *vcpu, int cpu)
 	unsigned int dest;
 
 	if (!kvm_arch_has_assigned_device(vcpu->kvm) ||
-		!irq_remapping_cap(IRQ_POSTING_CAP))
+		!irq_remapping_cap(IRQ_POSTING_CAP)  ||
+		!kvm_vcpu_apicv_active(vcpu))
 		return;
 
 	do {
@@ -2239,7 +2239,8 @@ static void vmx_vcpu_pi_put(struct kvm_vcpu *vcpu)
 	struct pi_desc *pi_desc = vcpu_to_pi_desc(vcpu);
 
 	if (!kvm_arch_has_assigned_device(vcpu->kvm) ||
-		!irq_remapping_cap(IRQ_POSTING_CAP))
+		!irq_remapping_cap(IRQ_POSTING_CAP)  ||
+		!kvm_vcpu_apicv_active(vcpu))
 		return;
 
 	/* Set SN when the vCPU is preempted */
@@ -2640,7 +2641,7 @@ static void nested_vmx_setup_ctls_msrs(struct vcpu_vmx *vmx)
 	vmx->nested.nested_vmx_pinbased_ctls_high |=
 		PIN_BASED_ALWAYSON_WITHOUT_TRUE_MSR |
 		PIN_BASED_VMX_PREEMPTION_TIMER;
-	if (vmx_cpu_uses_apicv(&vmx->vcpu))
+	if (kvm_vcpu_apicv_active(&vmx->vcpu))
 		vmx->nested.nested_vmx_pinbased_ctls_high |=
 			PIN_BASED_POSTED_INTR;
 
@@ -4352,6 +4353,26 @@ static bool cs_ss_rpl_check(struct kvm_vcpu *vcpu)
 		 (ss.selector & SEGMENT_RPL_MASK));
 }
 
+static bool nested_vmx_check_io_bitmaps(struct kvm_vcpu *vcpu,
+					unsigned int port, int size);
+static bool nested_vmx_exit_handled_io(struct kvm_vcpu *vcpu,
+				       struct vmcs12 *vmcs12)
+{
+	unsigned long exit_qualification;
+	unsigned short port;
+	int size;
+
+	if (!nested_cpu_has(vmcs12, CPU_BASED_USE_IO_BITMAPS))
+		return nested_cpu_has(vmcs12, CPU_BASED_UNCOND_IO_EXITING);
+
+	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
+
+	port = exit_qualification >> 16;
+	size = (exit_qualification & 7) + 1;
+
+	return nested_vmx_check_io_bitmaps(vcpu, port, size);
+}
+
 /*
  * Check if guest state is valid. Returns true if valid, false if
  * not.
@@ -4754,9 +4775,9 @@ static void vmx_update_msr_bitmap(struct kvm_vcpu *vcpu)
 	vmx->msr_bitmap_mode = mode;
 }
 
-static int vmx_cpu_uses_apicv(struct kvm_vcpu *vcpu)
+static bool vmx_get_enable_apicv(void)
 {
-	return enable_apicv && lapic_in_kernel(vcpu);
+	return enable_apicv;
 }
 
 static void nested_mark_vmcs12_pages_dirty(struct kvm_vcpu *vcpu)
@@ -4904,11 +4925,6 @@ static void vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 	kvm_apic_update_irr(vcpu, vmx->pi_desc.pir);
 }
 
-static void vmx_sync_pir_to_irr_dummy(struct kvm_vcpu *vcpu)
-{
-	return;
-}
-
 /*
  * Set up the vmcs's constant host-state fields, i.e., host-state fields that
  * will not change in the lifetime of the guest.
@@ -4978,11 +4994,18 @@ static u32 vmx_pin_based_exec_ctrl(struct vcpu_vmx *vmx)
 {
 	u32 pin_based_exec_ctrl = vmcs_config.pin_based_exec_ctrl;
 
-	if (!vmx_cpu_uses_apicv(&vmx->vcpu))
+	if (!kvm_vcpu_apicv_active(&vmx->vcpu))
 		pin_based_exec_ctrl &= ~PIN_BASED_POSTED_INTR;
 	/* Enable the preemption timer dynamically */
 	pin_based_exec_ctrl &= ~PIN_BASED_VMX_PREEMPTION_TIMER;
 	return pin_based_exec_ctrl;
+}
+
+static void vmx_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	vmcs_write32(PIN_BASED_VM_EXEC_CONTROL, vmx_pin_based_exec_ctrl(vmx));
 }
 
 static u32 vmx_exec_control(struct vcpu_vmx *vmx)
@@ -5023,7 +5046,7 @@ static u32 vmx_secondary_exec_control(struct vcpu_vmx *vmx)
 		exec_control &= ~SECONDARY_EXEC_UNRESTRICTED_GUEST;
 	if (!ple_gap)
 		exec_control &= ~SECONDARY_EXEC_PAUSE_LOOP_EXITING;
-	if (!vmx_cpu_uses_apicv(&vmx->vcpu))
+	if (!kvm_vcpu_apicv_active(&vmx->vcpu))
 		exec_control &= ~(SECONDARY_EXEC_APIC_REGISTER_VIRT |
 				  SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY);
 	exec_control &= ~SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE;
@@ -5088,7 +5111,7 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 		vmcs_write32(SECONDARY_VM_EXEC_CONTROL,
 				vmx_secondary_exec_control(vmx));
 
-	if (vmx_cpu_uses_apicv(&vmx->vcpu)) {
+	if (kvm_vcpu_apicv_active(&vmx->vcpu)) {
 		vmcs_write64(EOI_EXIT_BITMAP0, 0);
 		vmcs_write64(EOI_EXIT_BITMAP1, 0);
 		vmcs_write64(EOI_EXIT_BITMAP2, 0);
@@ -5246,7 +5269,7 @@ static void vmx_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 
 	kvm_make_request(KVM_REQ_APIC_PAGE_RELOAD, vcpu);
 
-	if (vmx_cpu_uses_apicv(vcpu))
+	if (kvm_vcpu_apicv_active(vcpu))
 		memset(&vmx->pi_desc, 0, sizeof(struct pi_desc));
 
 	if (vmx->vpid != 0)
@@ -5501,7 +5524,7 @@ static int handle_rmode_exception(struct kvm_vcpu *vcpu,
  */
 static void kvm_machine_check(void)
 {
-#if defined(CONFIG_X86_MCE) && defined(CONFIG_X86_64)
+#if defined(CONFIG_X86_MCE)
 	struct pt_regs regs = {
 		.cs = 3, /* Fake ring 3 no matter what the guest ran on */
 		.flags = X86_EFLAGS_IF,
@@ -6247,8 +6270,8 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 			return 1;
 		}
 		else
-			return x86_emulate_instruction(vcpu, gpa, EMULTYPE_SKIP,
-						       NULL, 0) == EMULATE_DONE;
+			return emulate_instruction(vcpu, EMULTYPE_SKIP) ==
+								EMULATE_DONE;
 	}
 
 	ret = handle_mmio_page_fault(vcpu, gpa, true);
@@ -6514,15 +6537,6 @@ static __init int hardware_setup(void)
 		kvm_has_tsc_control = true;
 		kvm_max_tsc_scaling_ratio = KVM_VMX_TSC_MULTIPLIER_MAX;
 		kvm_tsc_scaling_ratio_frac_bits = 48;
-	}
-
-	if (enable_apicv)
-		kvm_x86_ops->update_cr8_intercept = NULL;
-	else {
-		kvm_x86_ops->hwapic_irr_update = NULL;
-		kvm_x86_ops->hwapic_isr_update = NULL;
-		kvm_x86_ops->deliver_posted_interrupt = NULL;
-		kvm_x86_ops->sync_pir_to_irr = vmx_sync_pir_to_irr_dummy;
 	}
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
@@ -7352,8 +7366,10 @@ static int handle_vmread(struct kvm_vcpu *vcpu)
 		/* _system ok, as nested_vmx_check_permission verified cpl=0 */
 		if (kvm_write_guest_virt_system(vcpu, gva, &field_value,
 						(is_long_mode(vcpu) ? 8 : 4),
-						&e))
+						&e)) {
 			kvm_inject_page_fault(vcpu, &e);
+			return 1;
+		}
 	}
 
 	nested_vmx_succeed(vcpu);
@@ -7720,22 +7736,16 @@ static int (*const kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 static const int kvm_vmx_max_exit_handlers =
 	ARRAY_SIZE(kvm_vmx_exit_handlers);
 
-static bool nested_vmx_exit_handled_io(struct kvm_vcpu *vcpu,
-				       struct vmcs12 *vmcs12)
+/*
+ * Return true if an IO instruction with the specified port and size should cause
+ * a VM-exit into L1.
+ */
+bool nested_vmx_check_io_bitmaps(struct kvm_vcpu *vcpu, unsigned int port,
+				 int size)
 {
-	unsigned long exit_qualification;
+	struct vmcs12 *vmcs12 = get_vmcs12(vcpu);
 	gpa_t bitmap, last_bitmap;
-	unsigned int port;
-	int size;
 	u8 b;
-
-	if (!nested_cpu_has(vmcs12, CPU_BASED_USE_IO_BITMAPS))
-		return nested_cpu_has(vmcs12, CPU_BASED_UNCOND_IO_EXITING);
-
-	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
-
-	port = exit_qualification >> 16;
-	size = (exit_qualification & 7) + 1;
 
 	last_bitmap = (gpa_t)-1;
 	b = -1;
@@ -8389,7 +8399,7 @@ static void vmx_set_virtual_x2apic_mode(struct kvm_vcpu *vcpu, bool set)
 	 * apicv
 	 */
 	if (!cpu_has_vmx_virtualize_x2apic_mode() ||
-				!vmx_cpu_uses_apicv(vcpu))
+				!kvm_vcpu_apicv_active(vcpu))
 		return;
 
 	if (!cpu_need_tpr_shadow(vcpu))
@@ -8494,10 +8504,9 @@ static void vmx_hwapic_irr_update(struct kvm_vcpu *vcpu, int max_irr)
 	}
 }
 
-static void vmx_load_eoi_exitmap(struct kvm_vcpu *vcpu)
+static void vmx_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 *eoi_exit_bitmap)
 {
-	u64 *eoi_exit_bitmap = vcpu->arch.eoi_exit_bitmap;
-	if (!vmx_cpu_uses_apicv(vcpu))
+	if (!kvm_vcpu_apicv_active(vcpu))
 		return;
 
 	vmcs_write64(EOI_EXIT_BITMAP0, eoi_exit_bitmap[0]);
@@ -10863,11 +10872,71 @@ static void nested_vmx_entry_failure(struct kvm_vcpu *vcpu,
 		to_vmx(vcpu)->nested.sync_shadow_vmcs = true;
 }
 
+static int vmx_check_intercept_io(struct kvm_vcpu *vcpu,
+				  struct x86_instruction_info *info)
+{
+	struct vmcs12 *vmcs12 = get_vmcs12(vcpu);
+	unsigned short port;
+	bool intercept;
+	int size;
+
+	if (info->intercept == x86_intercept_in ||
+	    info->intercept == x86_intercept_ins) {
+		port = info->src_val;
+		size = info->dst_bytes;
+	} else {
+		port = info->dst_val;
+		size = info->src_bytes;
+	}
+
+	/*
+	 * If the 'use IO bitmaps' VM-execution control is 0, IO instruction
+	 * VM-exits depend on the 'unconditional IO exiting' VM-execution
+	 * control.
+	 *
+	 * Otherwise, IO instruction VM-exits are controlled by the IO bitmaps.
+	 */
+	if (!nested_cpu_has(vmcs12, CPU_BASED_USE_IO_BITMAPS))
+		intercept = nested_cpu_has(vmcs12,
+					   CPU_BASED_UNCOND_IO_EXITING);
+	else
+		intercept = nested_vmx_check_io_bitmaps(vcpu, port, size);
+
+	return intercept ? X86EMUL_UNHANDLEABLE : X86EMUL_CONTINUE;
+}
+
 static int vmx_check_intercept(struct kvm_vcpu *vcpu,
 			       struct x86_instruction_info *info,
 			       enum x86_intercept_stage stage)
 {
-	return X86EMUL_CONTINUE;
+	struct vmcs12 *vmcs12 = get_vmcs12(vcpu);
+	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+
+	switch (info->intercept) {
+	/*
+	 * RDPID causes #UD if disabled through secondary execution controls.
+	 * Because it is marked as EmulateOnUD, we need to intercept it here.
+	 */
+	case x86_intercept_rdtscp:
+		if (!nested_cpu_has2(vmcs12, SECONDARY_EXEC_RDTSCP)) {
+			ctxt->exception.vector = UD_VECTOR;
+			ctxt->exception.error_code_valid = false;
+			return X86EMUL_PROPAGATE_FAULT;
+		}
+		break;
+
+	case x86_intercept_in:
+	case x86_intercept_ins:
+	case x86_intercept_out:
+	case x86_intercept_outs:
+		return vmx_check_intercept_io(vcpu, info);
+
+	/* TODO: check more intercepts... */
+	default:
+		break;
+	}
+
+	return X86EMUL_UNHANDLEABLE;
 }
 
 #ifdef CONFIG_X86_64
@@ -10981,7 +11050,8 @@ static int pi_pre_block(struct kvm_vcpu *vcpu)
 	struct pi_desc *pi_desc = vcpu_to_pi_desc(vcpu);
 
 	if (!kvm_arch_has_assigned_device(vcpu->kvm) ||
-		!irq_remapping_cap(IRQ_POSTING_CAP))
+		!irq_remapping_cap(IRQ_POSTING_CAP)  ||
+		!kvm_vcpu_apicv_active(vcpu))
 		return 0;
 
 	vcpu->pre_pcpu = vcpu->cpu;
@@ -11058,7 +11128,8 @@ static void pi_post_block(struct kvm_vcpu *vcpu)
 	unsigned long flags;
 
 	if (!kvm_arch_has_assigned_device(vcpu->kvm) ||
-		!irq_remapping_cap(IRQ_POSTING_CAP))
+		!irq_remapping_cap(IRQ_POSTING_CAP)  ||
+		!kvm_vcpu_apicv_active(vcpu))
 		return;
 
 	do {
@@ -11119,7 +11190,8 @@ static int vmx_update_pi_irte(struct kvm *kvm, unsigned int host_irq,
 	int idx, ret = 0;
 
 	if (!kvm_arch_has_assigned_device(kvm) ||
-		!irq_remapping_cap(IRQ_POSTING_CAP))
+		!irq_remapping_cap(IRQ_POSTING_CAP) ||
+		!kvm_vcpu_apicv_active(kvm->vcpus[0]))
 		return 0;
 
 	idx = srcu_read_lock(&kvm->irq_srcu);
@@ -11244,7 +11316,8 @@ static struct kvm_x86_ops vmx_x86_ops __ro_after_init = {
 	.update_cr8_intercept = update_cr8_intercept,
 	.set_virtual_x2apic_mode = vmx_set_virtual_x2apic_mode,
 	.set_apic_access_page_addr = vmx_set_apic_access_page_addr,
-	.cpu_uses_apicv = vmx_cpu_uses_apicv,
+	.get_enable_apicv = vmx_get_enable_apicv,
+	.refresh_apicv_exec_ctrl = vmx_refresh_apicv_exec_ctrl,
 	.load_eoi_exitmap = vmx_load_eoi_exitmap,
 	.hwapic_irr_update = vmx_hwapic_irr_update,
 	.hwapic_isr_update = vmx_hwapic_isr_update,

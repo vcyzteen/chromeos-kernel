@@ -558,7 +558,8 @@ static int ath10k_core_get_board_id_from_otp(struct ath10k *ar)
 
 	if ((result & ATH10K_BMI_BOARD_ID_STATUS_MASK) != 0 ||
 	    (board_id == 0)) {
-		ath10k_warn(ar, "board id is not exist in otp, ignore it\n");
+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
+			   "board id does not exist in otp, ignore it\n");
 		return -EOPNOTSUPP;
 	}
 
@@ -1805,7 +1806,7 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
 	if (ret && ret != -EOPNOTSUPP) {
 		ath10k_err(ar, "failed to get board id from otp for qca99x0: %d\n",
 			   ret);
-		return ret;
+		goto err_free_firmware_files;
 	}
 
 	ret = ath10k_core_fetch_board_file(ar);

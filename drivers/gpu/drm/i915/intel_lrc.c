@@ -479,6 +479,7 @@ static void execlists_dequeue(struct intel_engine_cs *engine)
 		cursor->priotree.priority = INT_MAX;
 
 		__i915_gem_request_submit(cursor);
+		trace_i915_gem_request_in(cursor, port - engine->execlist_port);
 		last = cursor;
 		submit = true;
 	}
@@ -596,6 +597,7 @@ static void intel_lrc_irq_handler(unsigned long data)
 				execlists_context_status_change(port[0].request,
 								INTEL_CONTEXT_SCHEDULE_OUT);
 
+				trace_i915_gem_request_out(port[0].request);
 				i915_gem_request_put(port[0].request);
 				port[0] = port[1];
 				memset(&port[1], 0, sizeof(port[1]));
@@ -804,12 +806,6 @@ static int execlists_context_pin(struct intel_engine_cs *engine,
 		i915_ggtt_offset(ce->ring->vma);
 
 	ce->state->obj->mm.dirty = true;
-
-	/* Invalidate GuC TLB. */
-	if (i915.enable_guc_submission) {
-		struct drm_i915_private *dev_priv = ctx->i915;
-		I915_WRITE(GEN8_GTCR, GEN8_GTCR_INVALIDATE);
-	}
 
 	i915_gem_context_get(ctx);
 	return 0;
@@ -1135,6 +1131,7 @@ static int gen9_init_indirectctx_bb(struct intel_engine_cs *engine,
 	int ret;
 	struct drm_i915_private *dev_priv = engine->i915;
 	uint32_t index = wa_ctx_start(wa_ctx, *offset, CACHELINE_DWORDS);
+	uint32_t scratch_addr;
 
 	/* WaDisableCtxRestoreArbitration:bxt */
 	if (IS_BXT_REVID(dev_priv, 0, BXT_REVID_A1))
@@ -1146,22 +1143,19 @@ static int gen9_init_indirectctx_bb(struct intel_engine_cs *engine,
 		return ret;
 	index = ret;
 
-	/* WaClearSlmSpaceAtContextSwitch:kbl */
+	/* WaClearSlmSpaceAtContextSwitch:skl,bxt,kbl,glk,cfl */
 	/* Actual scratch location is at 128 bytes offset */
-	if (IS_KBL_REVID(dev_priv, 0, KBL_REVID_A0)) {
-		u32 scratch_addr =
-			i915_ggtt_offset(engine->scratch) + 2 * CACHELINE_BYTES;
+	scratch_addr = i915_ggtt_offset(engine->scratch) + 2 * CACHELINE_BYTES;
+	wa_ctx_emit(batch, index, GFX_OP_PIPE_CONTROL(6));
+	wa_ctx_emit(batch, index, (PIPE_CONTROL_FLUSH_L3 |
+				   PIPE_CONTROL_GLOBAL_GTT_IVB |
+				   PIPE_CONTROL_CS_STALL |
+				   PIPE_CONTROL_QW_WRITE));
+	wa_ctx_emit(batch, index, scratch_addr);
+	wa_ctx_emit(batch, index, 0);
+	wa_ctx_emit(batch, index, 0);
+	wa_ctx_emit(batch, index, 0);
 
-		wa_ctx_emit(batch, index, GFX_OP_PIPE_CONTROL(6));
-		wa_ctx_emit(batch, index, (PIPE_CONTROL_FLUSH_L3 |
-					   PIPE_CONTROL_GLOBAL_GTT_IVB |
-					   PIPE_CONTROL_CS_STALL |
-					   PIPE_CONTROL_QW_WRITE));
-		wa_ctx_emit(batch, index, scratch_addr);
-		wa_ctx_emit(batch, index, 0);
-		wa_ctx_emit(batch, index, 0);
-		wa_ctx_emit(batch, index, 0);
-	}
 	/* Pad to end of cacheline */
 	while (index % CACHELINE_DWORDS)
 		wa_ctx_emit(batch, index, MI_NOOP);

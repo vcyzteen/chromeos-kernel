@@ -175,6 +175,7 @@ struct cros_ec_device {
 	int event_size;
 	u32 host_event_wake_mask;
 	s64 last_event_time;
+	struct notifier_block notifier_ready;
 };
 
 /* struct cros_ec_dev_platform - ChromeOS EC platform information
