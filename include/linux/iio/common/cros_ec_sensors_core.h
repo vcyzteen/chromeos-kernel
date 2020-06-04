@@ -101,13 +101,6 @@ struct cros_ec_sensors_core_state {
 	/* Saved ranage if modified */
 	bool range_updated;
 	int curr_range;
-
-	/* Min and Max Sampling Frequency in mHz */
-	u32 min_freq;
-	u32 max_freq;
-
-	/* event fifo size represented in number of events */
-	u32 fifo_max_event_count;
 };
 
 /* Basic initialization of the core structure. */
