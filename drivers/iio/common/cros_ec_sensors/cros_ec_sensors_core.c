@@ -47,11 +47,8 @@ static void get_default_min_max_freq_and_fifo_size(enum motionsensor_type type,
 	*max_fifo_events = 128;
 	switch (type) {
 	case MOTIONSENSE_TYPE_ACCEL:
-		*min_freq = 12500;
-		*max_freq = 100000;
-		break;
 	case MOTIONSENSE_TYPE_GYRO:
-		*min_freq = 25000;
+		*min_freq = 12500;
 		*max_freq = 100000;
 		break;
 	case MOTIONSENSE_TYPE_MAG:
