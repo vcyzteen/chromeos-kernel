@@ -40,11 +40,6 @@ enum {
  */
 #define CROS_EC_SAMPLE_SIZE  (sizeof(s64) * 2)
 
-/*
- * minimum sampling period to use when device is suspending.
- */
-#define CROS_EC_MIN_SUSPEND_SAMPLING_FREQUENCY 1000  /* 1 second */
-
 typedef irqreturn_t (*cros_ec_sensors_capture_t)(int irq, void *p);
 
 /*
@@ -100,9 +95,6 @@ struct cros_ec_sensors_core_state {
 
 	/* Pointer to function used for accessing sensors values. */
 	cros_ec_sensors_read_t *read_ec_sensors_data;
-
-	/* Current sampling period */
-	int curr_sampl_freq;
 
 	/* Table of known available frequencies : 0, Min and Max in mHz */
 	int frequencies[3];
