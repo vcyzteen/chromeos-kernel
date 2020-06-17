@@ -5,11 +5,9 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2008 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 Intel Corporation
- * Copyright(c) 2019 Intel Corporation
+ * Copyright(c) 2008 - 2014, 2018 - 2020 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -29,11 +27,9 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 Intel Corporation
- * Copyright(c) 2019 Intel Corporation
+ * Copyright(c) 2008 - 2014, 2018 - 2020 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -93,7 +89,7 @@ struct iwl_ucode_header {
 	} u;
 };
 
-#define IWL_UCODE_INI_TLV_GROUP	0x1000000
+#define IWL_UCODE_TLV_DEBUG_BASE	0x1000005
 
 /*
  * new TLV uCode file layout
@@ -153,14 +149,12 @@ enum iwl_ucode_tlv_type {
 	IWL_UCODE_TLV_FW_FMAC_RECOVERY_INFO	= 59,
 	IWL_UCODE_TLV_FW_FSEQ_VERSION		= 60,
 
-	IWL_UCODE_TLV_DEBUG_BASE		= IWL_UCODE_INI_TLV_GROUP,
 	IWL_UCODE_TLV_TYPE_DEBUG_INFO		= IWL_UCODE_TLV_DEBUG_BASE + 0,
 	IWL_UCODE_TLV_TYPE_BUFFER_ALLOCATION	= IWL_UCODE_TLV_DEBUG_BASE + 1,
 	IWL_UCODE_TLV_TYPE_HCMD			= IWL_UCODE_TLV_DEBUG_BASE + 2,
 	IWL_UCODE_TLV_TYPE_REGIONS		= IWL_UCODE_TLV_DEBUG_BASE + 3,
 	IWL_UCODE_TLV_TYPE_TRIGGERS		= IWL_UCODE_TLV_DEBUG_BASE + 4,
-	IWL_UCODE_TLV_TYPE_DEBUG_FLOW		= IWL_UCODE_TLV_DEBUG_BASE + 5,
-	IWL_UCODE_TLV_DEBUG_MAX = IWL_UCODE_TLV_TYPE_DEBUG_FLOW,
+	IWL_UCODE_TLV_DEBUG_MAX = IWL_UCODE_TLV_TYPE_TRIGGERS,
 
 	/* TLVs 0x1000-0x2000 are for internal driver usage */
 	IWL_UCODE_TLV_FW_DBG_DUMP_LST	= 0x1000,
@@ -333,6 +327,8 @@ enum iwl_ucode_tlv_api {
 	IWL_UCODE_TLV_API_REDUCED_SCAN_CONFIG   = (__force iwl_ucode_tlv_api_t)56,
 	IWL_UCODE_TLV_API_ADWELL_HB_DEF_N_AP	= (__force iwl_ucode_tlv_api_t)57,
 	IWL_UCODE_TLV_API_SCAN_EXT_CHAN_VER	= (__force iwl_ucode_tlv_api_t)58,
+	IWL_UCODE_TLV_API_BAND_IN_RX_DATA	= (__force iwl_ucode_tlv_api_t)59,
+
 
 	NUM_IWL_UCODE_TLV_API
 #ifdef __CHECKER__
@@ -430,8 +426,8 @@ typedef unsigned int __bitwise iwl_ucode_tlv_capa_t;
  *	filter API
  * @IWL_UCODE_TLV_CAPA_FTM_CALIBRATED: has FTM calibrated and thus supports both
  *	initiator and responder
- *
  * @IWL_UCODE_TLV_CAPA_MLME_OFFLOAD: supports MLME offload
+ * @IWL_UCODE_TLV_CAPA_PROTECTED_TWT: Supports protection of TWT action frames
  *
  * @NUM_IWL_UCODE_TLV_CAPA: number of bits used
  */
@@ -476,6 +472,10 @@ enum iwl_ucode_tlv_capa {
 	IWL_UCODE_TLV_CAPA_ULTRA_HB_CHANNELS		= (__force iwl_ucode_tlv_capa_t)48,
 	IWL_UCODE_TLV_CAPA_CS_MODIFY			= (__force iwl_ucode_tlv_capa_t)49,
 	IWL_UCODE_TLV_CAPA_SET_LTR_GEN2			= (__force iwl_ucode_tlv_capa_t)50,
+	IWL_UCODE_TLV_CAPA_SET_PPAG			= (__force iwl_ucode_tlv_capa_t)52,
+	IWL_UCODE_TLV_CAPA_TAS_CFG			= (__force iwl_ucode_tlv_capa_t)53,
+	IWL_UCODE_TLV_CAPA_SESSION_PROT_CMD		= (__force iwl_ucode_tlv_capa_t)54,
+	IWL_UCODE_TLV_CAPA_PROTECTED_TWT		= (__force iwl_ucode_tlv_capa_t)56,
 
 	/* set 2 */
 	IWL_UCODE_TLV_CAPA_EXTENDED_DTS_MEASURE		= (__force iwl_ucode_tlv_capa_t)64,
@@ -500,6 +500,7 @@ enum iwl_ucode_tlv_capa {
 	IWL_UCODE_TLV_CAPA_CSI_REPORTING		= (__force iwl_ucode_tlv_capa_t)90,
 	IWL_UCODE_TLV_CAPA_CSI_REPORTING_V2		= (__force iwl_ucode_tlv_capa_t)91,
 	IWL_UCODE_TLV_CAPA_DBG_SUSPEND_RESUME_CMD_SUPP	= (__force iwl_ucode_tlv_capa_t)92,
+	IWL_UCODE_TLV_CAPA_DBG_BUF_ALLOC_CMD_SUPP	= (__force iwl_ucode_tlv_capa_t)93,
 
 	/* set 3 */
 	IWL_UCODE_TLV_CAPA_MLME_OFFLOAD			= (__force iwl_ucode_tlv_capa_t)96,
@@ -556,6 +557,10 @@ enum iwl_fw_phy_cfg {
 	FW_PHY_CFG_TX_CHAIN = 0xf << FW_PHY_CFG_TX_CHAIN_POS,
 	FW_PHY_CFG_RX_CHAIN_POS = 20,
 	FW_PHY_CFG_RX_CHAIN = 0xf << FW_PHY_CFG_RX_CHAIN_POS,
+	FW_PHY_CFG_CHAIN_SAD_POS = 23,
+	FW_PHY_CFG_CHAIN_SAD_ENABLED = 0x1 << FW_PHY_CFG_CHAIN_SAD_POS,
+	FW_PHY_CFG_CHAIN_SAD_ANT_A = 0x2 << FW_PHY_CFG_CHAIN_SAD_POS,
+	FW_PHY_CFG_CHAIN_SAD_ANT_B = 0x4 << FW_PHY_CFG_CHAIN_SAD_POS,
 	FW_PHY_CFG_SHARED_CLK = BIT(31),
 };
 
@@ -1003,5 +1008,20 @@ struct iwl_fw_cmd_version {
 	u8 cmd_ver;
 	u8 notif_ver;
 } __packed;
+
+static inline size_t _iwl_tlv_array_len(const struct iwl_ucode_tlv *tlv,
+					size_t fixed_size, size_t var_size)
+{
+	size_t var_len = le32_to_cpu(tlv->length) - fixed_size;
+
+	if (WARN_ON(var_len % var_size))
+		return 0;
+
+	return var_len / var_size;
+}
+
+#define iwl_tlv_array_len(_tlv_ptr, _struct_ptr, _memb)			\
+	_iwl_tlv_array_len((_tlv_ptr), sizeof(*(_struct_ptr)),		\
+			   sizeof(_struct_ptr->_memb[0]))
 
 #endif  /* __iwl_fw_file_h__ */

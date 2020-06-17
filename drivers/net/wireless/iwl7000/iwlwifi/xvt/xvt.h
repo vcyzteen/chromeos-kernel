@@ -191,13 +191,13 @@ struct tx_payload {
 /**
  * iwl_sw_stack_config - Holds active SW stack config as set from user space
  * @load_mask: Which FW are to be loaded during SW stack up
- * @iwl_phy_cfg_cmd: Which calibrations should be done
+ * @fw_calib_cmd_cfg: Which calibrations should be done
  */
 struct iwl_sw_stack_config {
 	u32 load_mask;
 	u32 calib_override_mask;
 	u32 fw_dbg_flags;
-	struct iwl_phy_cfg_cmd fw_calib_cmd_cfg[IWL_UCODE_TYPE_MAX];
+	struct iwl_phy_cfg_cmd_v3 fw_calib_cmd_cfg[IWL_UCODE_TYPE_MAX];
 };
 
 /* Note: This structure is read from the device with IO accesses,
@@ -349,7 +349,7 @@ struct iwl_umac_error_event_table {
  * @trans: transport data
  */
 struct iwl_xvt_skb_info {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	void *trans[2];
 };
 
@@ -463,7 +463,7 @@ void iwl_xvt_destroy_reorder_buffer(struct iwl_xvt *xvt,
 static inline bool iwl_xvt_is_unified_fw(struct iwl_xvt *xvt)
 {
 	/* TODO - replace with TLV once defined */
-	return xvt->trans->cfg->device_family >= IWL_DEVICE_FAMILY_22000;
+	return xvt->trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_22000;
 }
 
 static inline bool iwl_xvt_is_cdb_supported(struct iwl_xvt *xvt)

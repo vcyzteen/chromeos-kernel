@@ -5,10 +5,9 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2007 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(C) 2015 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
+ * Copyright(c) 2007 - 2014, 2018 - 2020 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -28,10 +27,9 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(C) 2015 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
+ * Copyright(c) 2005 - 2014, 2018 - 2020 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -85,6 +83,7 @@
 #include "iwl-trans.h"
 #include "fw/dbg.h"
 #include "fw/acpi.h"
+#include "fw/img.h"
 
 #define XVT_UCODE_CALIB_TIMEOUT (CPTCFG_IWL_TIMEOUT_FACTOR * HZ)
 #define XVT_SCU_BASE	(0xe6a00000)
@@ -163,6 +162,11 @@ void iwl_xvt_send_user_rx_notif(struct iwl_xvt *xvt,
 	case WIDE_ID(XVT_GROUP, IQ_CALIB_CONFIG_NOTIF):
 		iwl_xvt_user_send_notif(xvt,
 					IWL_TM_USER_CMD_NOTIF_IQ_CALIB,
+					data, size, GFP_ATOMIC);
+		break;
+	case WIDE_ID(XVT_GROUP, RUN_TIME_CALIB_DONE_NOTIF):
+		iwl_xvt_user_send_notif(xvt,
+					IWL_TM_USER_CMD_NOTIF_RUN_TIME_CALIB_DONE,
 					data, size, GFP_ATOMIC);
 		break;
 	case WIDE_ID(PHY_OPS_GROUP, CT_KILL_NOTIFICATION):
@@ -305,7 +309,7 @@ static int iwl_xvt_set_sw_config(struct iwl_xvt *xvt,
 {
 	struct iwl_xvt_sw_cfg_request *sw_cfg =
 				(struct iwl_xvt_sw_cfg_request *)data_in->data;
-	struct iwl_phy_cfg_cmd *fw_calib_cmd_cfg =
+	struct iwl_phy_cfg_cmd_v3 *fw_calib_cmd_cfg =
 				xvt->sw_stack_cfg.fw_calib_cmd_cfg;
 	__le32 cfg_mask = cpu_to_le32(sw_cfg->cfg_mask),
 	       fw_calib_event, fw_calib_flow,
@@ -365,7 +369,7 @@ static int iwl_xvt_get_sw_config(struct iwl_xvt *xvt,
 {
 	struct iwl_xvt_sw_cfg_request *get_cfg_req;
 	struct iwl_xvt_sw_cfg_request *sw_cfg;
-	struct iwl_phy_cfg_cmd *fw_calib_cmd_cfg =
+	struct iwl_phy_cfg_cmd_v3 *fw_calib_cmd_cfg =
 				xvt->sw_stack_cfg.fw_calib_cmd_cfg;
 	__le32 event_trigger, flow_trigger;
 	int i, u;
@@ -420,9 +424,10 @@ static int iwl_xvt_get_sw_config(struct iwl_xvt *xvt,
 
 static int iwl_xvt_send_phy_cfg_cmd(struct iwl_xvt *xvt, u32 ucode_type)
 {
-	struct iwl_phy_cfg_cmd *calib_cmd_cfg =
+	struct iwl_phy_cfg_cmd_v3 *calib_cmd_cfg =
 		&xvt->sw_stack_cfg.fw_calib_cmd_cfg[ucode_type];
 	int err;
+	size_t cmd_size;
 
 	IWL_DEBUG_INFO(xvt, "Sending Phy CFG command: 0x%x\n",
 		       calib_cmd_cfg->phy_cfg);
@@ -432,10 +437,14 @@ static int iwl_xvt_send_phy_cfg_cmd(struct iwl_xvt *xvt, u32 ucode_type)
 		calib_cmd_cfg->calib_control.event_trigger = 0;
 		calib_cmd_cfg->calib_control.flow_trigger = 0;
 	}
+	cmd_size = iwl_fw_lookup_cmd_ver(xvt->fw, IWL_ALWAYS_LONG_GROUP,
+					 PHY_CONFIGURATION_CMD) == 3 ?
+					    sizeof(struct iwl_phy_cfg_cmd_v3) :
+					    sizeof(struct iwl_phy_cfg_cmd_v1);
 
 	/* Sending calibration configuration control data */
 	err = iwl_xvt_send_cmd_pdu(xvt, PHY_CONFIGURATION_CMD, 0,
-				   sizeof(*calib_cmd_cfg), calib_cmd_cfg);
+				   cmd_size, calib_cmd_cfg);
 	if (err)
 		IWL_ERR(xvt, "Error (%d) running INIT calibrations control\n",
 			err);
@@ -672,6 +681,11 @@ static int iwl_xvt_continue_init(struct iwl_xvt *xvt)
 
 	xvt->state = IWL_XVT_STATE_OPERATIONAL;
 
+	iwl_dbg_tlv_time_point(&xvt->fwrt, IWL_FW_INI_TIME_POINT_POST_INIT,
+			       NULL);
+	iwl_dbg_tlv_time_point(&xvt->fwrt, IWL_FW_INI_TIME_POINT_PERIODIC,
+			       NULL);
+
 	if (xvt->sw_stack_cfg.load_mask & IWL_XVT_LOAD_MASK_RUNTIME)
 		/* Run runtime FW stops the device by itself if error occurs */
 		err = iwl_xvt_run_runtime_fw(xvt);
@@ -735,15 +749,14 @@ static int iwl_xvt_get_phy_db(struct iwl_xvt *xvt,
 	return 0;
 }
 
-static struct iwl_device_cmd *iwl_xvt_init_tx_dev_cmd(struct iwl_xvt *xvt)
+static struct iwl_device_tx_cmd *iwl_xvt_init_tx_dev_cmd(struct iwl_xvt *xvt)
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 
 	dev_cmd = iwl_trans_alloc_tx_cmd(xvt->trans);
 	if (unlikely(!dev_cmd))
 		return NULL;
 
-	memset(dev_cmd, 0, sizeof(*dev_cmd));
 	dev_cmd->hdr.cmd = TX_CMD;
 
 	return dev_cmd;
@@ -773,12 +786,12 @@ static u16 iwl_xvt_get_offload_assist(struct ieee80211_hdr *hdr)
 	return offload_assist;
 }
 
-static struct iwl_device_cmd *
+static struct iwl_device_tx_cmd *
 iwl_xvt_set_tx_params_gen3(struct iwl_xvt *xvt, struct sk_buff *skb,
 			   u32 rate_flags, u32 tx_flags)
 
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	struct iwl_tx_cmd_gen3 *cmd;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 	struct iwl_xvt_skb_info *skb_info = (void *)skb->cb;
@@ -813,11 +826,11 @@ iwl_xvt_set_tx_params_gen3(struct iwl_xvt *xvt, struct sk_buff *skb,
 	return dev_cmd;
 }
 
-static struct iwl_device_cmd *
+static struct iwl_device_tx_cmd *
 iwl_xvt_set_tx_params_gen2(struct iwl_xvt *xvt, struct sk_buff *skb,
 			   u32 rate_flags, u32 flags)
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	struct iwl_xvt_skb_info *skb_info = (void *)skb->cb;
 	struct iwl_tx_cmd_gen2 *tx_cmd;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
@@ -851,11 +864,11 @@ iwl_xvt_set_tx_params_gen2(struct iwl_xvt *xvt, struct sk_buff *skb,
 /*
  * Allocates and sets the Tx cmd the driver data pointers in the skb
  */
-static struct iwl_device_cmd *
+static struct iwl_device_tx_cmd *
 iwl_xvt_set_mod_tx_params(struct iwl_xvt *xvt, struct sk_buff *skb,
 			  u8 sta_id, u32 rate_flags, u32 flags)
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	struct iwl_xvt_skb_info *skb_info = (void *)skb->cb;
 	struct iwl_tx_cmd *tx_cmd;
 
@@ -915,7 +928,7 @@ static int iwl_xvt_send_packet(struct iwl_xvt *xvt,
 			       u32 *status, struct tx_meta_data *meta_tx)
 {
 	struct sk_buff *skb;
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	int time_remain, err = 0;
 	u32 flags = 0;
 	u32 rate_flags = tx_req->rate_flags;
@@ -940,7 +953,8 @@ static int iwl_xvt_send_packet(struct iwl_xvt *xvt,
 	if (iwl_xvt_is_unified_fw(xvt)) {
 		flags |= IWL_TX_FLAGS_CMD_RATE;
 
-		if (xvt->trans->cfg->device_family >= IWL_DEVICE_FAMILY_22560)
+		if (xvt->trans->trans_cfg->device_family >=
+		    IWL_DEVICE_FAMILY_AX210)
 			dev_cmd = iwl_xvt_set_tx_params_gen3(xvt, skb,
 							     rate_flags,
 							     flags);
@@ -1011,11 +1025,11 @@ err:
 	return err;
 }
 
-static struct iwl_device_cmd *
+static struct iwl_device_tx_cmd *
 iwl_xvt_set_tx_params(struct iwl_xvt *xvt, struct sk_buff *skb,
 		      struct iwl_xvt_tx_start *tx_start, u8 packet_index)
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	struct iwl_xvt_skb_info *skb_info = (void *)skb->cb;
 	struct iwl_tx_cmd *tx_cmd;
 	/* the skb should already hold the data */
@@ -1149,7 +1163,7 @@ static int iwl_xvt_transmit_packet(struct iwl_xvt *xvt,
 				   u8 frag_num,
 				   u32 *status)
 {
-	struct iwl_device_cmd *dev_cmd;
+	struct iwl_device_tx_cmd *dev_cmd;
 	int time_remain, err = 0;
 	u8 queue = tx_start->frames_data[packet_index].queue;
 	struct tx_queue_data *queue_data = &xvt->queue_data[queue];
@@ -1161,7 +1175,8 @@ static int iwl_xvt_transmit_packet(struct iwl_xvt *xvt,
 			       frag_num);
 
 	if (iwl_xvt_is_unified_fw(xvt)) {
-		if (xvt->trans->cfg->device_family >= IWL_DEVICE_FAMILY_22560)
+		if (xvt->trans->trans_cfg->device_family >=
+		    IWL_DEVICE_FAMILY_AX210)
 			dev_cmd = iwl_xvt_set_tx_params_gen3(xvt, skb,
 							     rate_flags,
 							     tx_flags);

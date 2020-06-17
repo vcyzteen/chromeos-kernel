@@ -1,6 +1,7 @@
 /*
  * Copyright(c) 2015 - 2017 Intel Deutschland GmbH
  * Copyright (C) 2018 Intel Corporation
+ * Copyright (C) 2020 Intel Corporation
  *
  * Backport functionality introduced in Linux 4.4.
  *
@@ -117,8 +118,7 @@ int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 	case cpu_to_le16(0):
 		if (iftype != NL80211_IFTYPE_ADHOC &&
 		    iftype != NL80211_IFTYPE_STATION &&
-		    !ieee80211_viftype_ocb(iftype) &&
-		    !ieee80211_viftype_nan_data(iftype))
+		    !ieee80211_viftype_ocb(iftype))
 				return -1;
 		break;
 	}
@@ -156,7 +156,7 @@ __frame_add_frag(struct sk_buff *skb, struct page *page,
 	struct skb_shared_info *sh = skb_shinfo(skb);
 	int page_offset;
 
-	page_ref_inc(page);
+	get_page(page);
 	page_offset = ptr - page_address(page);
 	skb_add_rx_frag(skb, sh->nr_frags, page, page_offset, len, size);
 }
@@ -630,40 +630,6 @@ void netdev_rss_key_fill(void *buffer, size_t len)
 }
 EXPORT_SYMBOL_GPL(netdev_rss_key_fill);
 #endif /* < 3.19.0 */
-
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
-/**
- * memdup_user_nul - duplicate memory region from user space and NUL-terminate
- *
- * @src: source address in user space
- * @len: number of bytes to copy
- *
- * Returns an ERR_PTR() on failure.
- */
-void *memdup_user_nul(const void __user *src, size_t len)
-{
-	char *p;
-
-	/*
-	 * Always use GFP_KERNEL, since copy_from_user() can sleep and
-	 * cause pagefault, which makes it pointless to use GFP_NOFS
-	 * or GFP_ATOMIC.
-	 */
-	p = kmalloc(len + 1, GFP_KERNEL);
-	if (!p)
-		return ERR_PTR(-ENOMEM);
-
-	if (copy_from_user(p, src, len)) {
-		kfree(p);
-		return ERR_PTR(-EFAULT);
-	}
-	p[len] = '\0';
-
-	return p;
-}
-EXPORT_SYMBOL(memdup_user_nul);
-#endif /* < 4.5.0 */
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
 /**
