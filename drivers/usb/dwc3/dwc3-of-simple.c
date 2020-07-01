@@ -68,8 +68,10 @@ static int dwc3_of_simple_probe(struct platform_device *pdev)
 
 		clk = of_clk_get(np, i);
 		if (IS_ERR(clk)) {
-			while (--i >= 0)
+			while (--i >= 0) {
+				clk_disable_unprepare(simple->clks[i]);
 				clk_put(simple->clks[i]);
+			}
 			return PTR_ERR(clk);
 		}
 
