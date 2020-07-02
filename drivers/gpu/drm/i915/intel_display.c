@@ -12689,15 +12689,25 @@ intel_atomic_enable_hdcp(struct drm_atomic_state *old_state)
 	for_each_connector_in_state(old_state, conn, old_conn_state, i) {
 		struct intel_connector *intel_conn = to_intel_connector(conn);
 		uint64_t new, old;
+		bool noop;
 
 		if (!intel_conn->hdcp_shim)
 			continue;
 
 		old = old_conn_state->content_protection;
 		new = conn->state->content_protection;
+
+		/*
+		 * We don't need to do anything if the state hasn't changed, or
+		 * if userspace is asking for desired and we're already enabled.
+		 */
+		noop = new == old ||
+		       (new == DRM_MODE_CONTENT_PROTECTION_DESIRED &&
+		        old == DRM_MODE_CONTENT_PROTECTION_ENABLED);
+
 		if (!conn->state->crtc ||
 		    new != DRM_MODE_CONTENT_PROTECTION_DESIRED ||
-		    (new == old && old_conn_state->crtc == conn->state->crtc))
+		    (noop && old_conn_state->crtc == conn->state->crtc))
 			continue;
 
 		intel_hdcp_enable(intel_conn);
@@ -15743,6 +15753,20 @@ void intel_connector_unregister(struct drm_connector *connector)
 	intel_panel_destroy_backlight(connector);
 }
 
+static void intel_hpd_poll_fini(struct drm_device *dev)
+{
+	struct intel_connector *connector;
+
+	/* First disable polling... */
+	drm_kms_helper_poll_fini(dev);
+
+	/* Then kill the work that may have been queued by hpd. */
+	for_each_intel_connector(dev, connector) {
+		if (connector->modeset_retry_work.func)
+			cancel_work_sync(&connector->modeset_retry_work);
+	}
+}
+
 void intel_modeset_cleanup(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = to_i915(dev);
@@ -15763,7 +15787,7 @@ void intel_modeset_cleanup(struct drm_device *dev)
 	 * Due to the hpd irq storm handling the hotplug work can re-arm the
 	 * poll handlers. Hence disable polling after hpd handling is shut down.
 	 */
-	drm_kms_helper_poll_fini(dev);
+	intel_hpd_poll_fini(dev);
 
 	intel_unregister_dsm_handler();
 

@@ -57,6 +57,11 @@ static int drm_dp_send_dpcd_write(struct drm_dp_mst_topology_mgr *mgr,
 
 static void drm_dp_send_link_address(struct drm_dp_mst_topology_mgr *mgr,
 				     struct drm_dp_mst_branch *mstb);
+
+static void
+drm_dp_send_clear_payload_id_table(struct drm_dp_mst_topology_mgr *mgr,
+				   struct drm_dp_mst_branch *mstb);
+
 static int drm_dp_send_enum_path_resources(struct drm_dp_mst_topology_mgr *mgr,
 					   struct drm_dp_mst_branch *mstb,
 					   struct drm_dp_mst_port *port);
@@ -592,6 +597,8 @@ static bool drm_dp_sideband_parse_reply(struct drm_dp_sideband_msg_rx *raw,
 	case DP_POWER_DOWN_PHY:
 	case DP_POWER_UP_PHY:
 		return drm_dp_sideband_parse_power_updown_phy_ack(raw, msg);
+	case DP_CLEAR_PAYLOAD_ID_TABLE:
+		return true; /* since there's nothing to parse */
 	default:
 		DRM_ERROR("Got unknown reply 0x%02x\n", msg->req_type);
 		return false;
@@ -684,6 +691,15 @@ static int build_link_address(struct drm_dp_sideband_msg_tx *msg)
 	struct drm_dp_sideband_msg_req_body req;
 
 	req.req_type = DP_LINK_ADDRESS;
+	drm_dp_encode_sideband_req(&req, msg);
+	return 0;
+}
+
+static int build_clear_payload_id_table(struct drm_dp_sideband_msg_tx *msg)
+{
+	struct drm_dp_sideband_msg_req_body req;
+
+	req.req_type = DP_CLEAR_PAYLOAD_ID_TABLE;
 	drm_dp_encode_sideband_req(&req, msg);
 	return 0;
 }
@@ -1374,17 +1390,35 @@ static void drm_dp_mst_link_probe_work(struct work_struct *work)
 {
 	struct drm_dp_mst_topology_mgr *mgr = container_of(work, struct drm_dp_mst_topology_mgr, work);
 	struct drm_dp_mst_branch *mstb;
+	bool clear_payload_id_table;
 
 	mutex_lock(&mgr->lock);
+	clear_payload_id_table = !mgr->payload_id_table_cleared;
+	mgr->payload_id_table_cleared = true;
+
 	mstb = mgr->mst_primary;
 	if (mstb) {
 		kref_get(&mstb->kref);
 	}
 	mutex_unlock(&mgr->lock);
-	if (mstb) {
-		drm_dp_check_and_send_link_address(mgr, mstb);
-		drm_dp_put_mst_branch_device(mstb);
+	if (!mstb)
+		return;
+
+	/*
+	 * Certain branch devices seem to incorrectly report an available_pbn
+	 * of 0 on downstream sinks, even after clearing the
+	 * DP_PAYLOAD_ALLOCATE_* registers in
+	 * drm_dp_mst_topology_mgr_set_mst(). Namely, the CableMatters USB-C
+	 * 2x DP hub. Sending a CLEAR_PAYLOAD_ID_TABLE message seems to make
+	 * things work again.
+	 */
+	if (clear_payload_id_table) {
+		DRM_DEBUG_KMS("Clearing payload ID table\n");
+		drm_dp_send_clear_payload_id_table(mgr, mstb);
 	}
+
+	drm_dp_check_and_send_link_address(mgr, mstb);
+	drm_dp_put_mst_branch_device(mstb);
 }
 
 static bool drm_dp_validate_guid(struct drm_dp_mst_topology_mgr *mgr,
@@ -1649,6 +1683,28 @@ static void drm_dp_send_link_address(struct drm_dp_mst_topology_mgr *mgr,
 		mstb->link_address_sent = false;
 		DRM_DEBUG_KMS("link address failed %d\n", ret);
 	}
+
+	kfree(txmsg);
+}
+
+void drm_dp_send_clear_payload_id_table(struct drm_dp_mst_topology_mgr *mgr,
+					struct drm_dp_mst_branch *mstb)
+{
+	struct drm_dp_sideband_msg_tx *txmsg;
+	int len, ret;
+
+	txmsg = kzalloc(sizeof(*txmsg), GFP_KERNEL);
+	if (!txmsg)
+		return;
+
+	txmsg->dst = mstb;
+	len = build_clear_payload_id_table(txmsg);
+
+	drm_dp_queue_down_tx(mgr, txmsg);
+
+	ret = drm_dp_mst_wait_tx_reply(mstb, txmsg);
+	if (ret > 0 && txmsg->reply.reply_type == 1)
+		DRM_DEBUG_KMS("clear payload table id nak received\n");
 
 	kfree(txmsg);
 }
@@ -2183,6 +2239,7 @@ int drm_dp_mst_topology_mgr_set_mst(struct drm_dp_mst_topology_mgr *mgr, bool ms
 		mgr->payload_mask = 0;
 		set_bit(0, &mgr->payload_mask);
 		mgr->vcpi_mask = 0;
+		mgr->payload_id_table_cleared = false;
 	}
 
 out_unlock:
@@ -2497,10 +2554,18 @@ enum drm_connector_status drm_dp_mst_detect_port(struct drm_connector *connector
 {
 	enum drm_connector_status status = connector_status_disconnected;
 
+	/*
+	 * Take the destroy_connector_lock to avoid freeing the port/connector
+	 * while we do our EDID read.
+	 */
+	mutex_lock(&mgr->destroy_connector_lock);
+
 	/* we need to search for the port in the mgr in case its gone */
 	port = drm_dp_get_validated_port_ref(mgr, port);
-	if (!port)
+	if (!port) {
+		mutex_unlock(&mgr->destroy_connector_lock);
 		return connector_status_disconnected;
+	}
 
 	if (!port->ddps)
 		goto out;
@@ -2524,6 +2589,7 @@ enum drm_connector_status drm_dp_mst_detect_port(struct drm_connector *connector
 	}
 out:
 	drm_dp_put_port(port);
+	mutex_unlock(&mgr->destroy_connector_lock);
 	return status;
 }
 EXPORT_SYMBOL(drm_dp_mst_detect_port);
@@ -3078,22 +3144,33 @@ static void drm_dp_destroy_connector_work(struct work_struct *work)
 	struct drm_dp_mst_topology_mgr *mgr = container_of(work, struct drm_dp_mst_topology_mgr, destroy_connector_work);
 	struct drm_dp_mst_port *port;
 	bool send_hotplug = false;
+
+	mutex_lock(&mgr->destroy_connector_lock);
+	/*
+	* At this point, the port reference count should be zero for all
+	* ports in the destroy list.
+	*
+	* In the deletion loop below, we need references to be valid when
+	* calling update_payload_part1 for all ports within the manager. So loop
+	* through the ports slated for destruction and re-initialize their
+	* refcounts for use below.
+	*/
+	list_for_each_entry(port, &mgr->destroy_connector_list, next) {
+		WARN_ON(atomic_read(&port->kref.refcount) != 0);
+		kref_init(&port->kref);
+	}
+
 	/*
 	 * Not a regular list traverse as we have to drop the destroy
 	 * connector lock before destroying the connector, to avoid AB->BA
 	 * ordering between this lock and the config mutex.
 	 */
 	for (;;) {
-		mutex_lock(&mgr->destroy_connector_lock);
 		port = list_first_entry_or_null(&mgr->destroy_connector_list, struct drm_dp_mst_port, next);
-		if (!port) {
-			mutex_unlock(&mgr->destroy_connector_lock);
+		if (!port)
 			break;
-		}
 		list_del(&port->next);
-		mutex_unlock(&mgr->destroy_connector_lock);
 
-		kref_init(&port->kref);
 		INIT_LIST_HEAD(&port->next);
 
 		mgr->cbs->destroy_connector(mgr, port->connector);
@@ -3107,9 +3184,16 @@ static void drm_dp_destroy_connector_work(struct work_struct *work)
 			drm_dp_mst_put_payload_id(mgr, port->vcpi.vcpi);
 		}
 
+		/*
+		 * This warning ensures that everything between the kref re-init
+		 * loop above and here is not leaking references.
+		 */
+		WARN_ON(atomic_read(&port->kref.refcount) != 1);
+
 		kref_put(&port->kref, drm_dp_free_mst_port);
 		send_hotplug = true;
 	}
+	mutex_unlock(&mgr->destroy_connector_lock);
 	if (send_hotplug)
 		(*mgr->cbs->hotplug)(mgr);
 }
