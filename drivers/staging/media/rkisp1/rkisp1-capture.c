@@ -679,7 +679,7 @@ static void rkisp1_handle_buffer(struct rkisp1_capture *cap)
 
 	if (curr_buf) {
 		curr_buf->vb.sequence = isp->frame_sequence;
-		curr_buf->vb.vb2_buf.timestamp = ktime_get_boottime_ns();
+		curr_buf->vb.timestamp = ns_to_timeval(ktime_get_boot_ns());
 		curr_buf->vb.field = V4L2_FIELD_NONE;
 		vb2_buffer_done(&curr_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 	} else {

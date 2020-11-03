@@ -324,7 +324,7 @@ rkisp1_stats_send_measurement(struct rkisp1_stats *stats, u32 isp_ris)
 	vb2_set_plane_payload(&cur_buf->vb.vb2_buf, 0,
 			      sizeof(struct rkisp1_stat_buffer));
 	cur_buf->vb.sequence = frame_sequence;
-	cur_buf->vb.vb2_buf.timestamp = timestamp;
+	cur_buf->vb.timestamp = ns_to_timeval(timestamp);
 	vb2_buffer_done(&cur_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 }
 
