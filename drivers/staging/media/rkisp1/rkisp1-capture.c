@@ -959,6 +959,135 @@ err_disable_cap:
 	return ret;
 }
 
+/* -----------------------------------------------------------------------------
+ * Pipeline power management
+ *
+ *
+ * Entities must be powered up when part of a pipeline that contains at least
+ * one open video device node.
+ *
+ * To achieve this use the entity use_count field to track the number of users.
+ * For entities corresponding to video device nodes the use_count field stores
+ * the users count of the node. For entities corresponding to subdevs the
+ * use_count field stores the total number of users of all video device nodes
+ * in the pipeline.
+ *
+ * The rkisp1_pipeline_pm_use() function must be called in the open() and
+ * close() handlers of video device nodes. It increments or decrements the use
+ * count of all subdev entities in the pipeline.
+ *
+ * To react to link management on powered pipelines, the link setup notification
+ * callback updates the use count of all entities in the source and sink sides
+ * of the link.
+ *
+ * Copied from the omap3isp driver.
+ */
+
+/*
+ * rkisp1_pipeline_pm_power_one - Apply power change to an entity
+ * @entity: The entity
+ * @change: Use count change
+ *
+ * Change the entity use count by @change. If the entity is a subdev update its
+ * power state by calling the core::s_power operation when the use count goes
+ * from 0 to != 0 or from != 0 to 0.
+ *
+ * Return 0 on success or a negative error code on failure.
+ */
+static int rkisp1_pipeline_pm_power_one(struct media_entity *entity, int change)
+{
+	struct v4l2_subdev *subdev;
+	int ret;
+
+	subdev = media_entity_type(entity) == MEDIA_ENT_T_V4L2_SUBDEV
+	       ? media_entity_to_v4l2_subdev(entity) : NULL;
+
+	if (entity->use_count == 0 && change > 0 && subdev) {
+		ret = v4l2_subdev_call(subdev, core, s_power, 1);
+		if (ret < 0 && ret != -ENOIOCTLCMD)
+			return ret;
+	}
+
+	entity->use_count += change;
+	WARN_ON(entity->use_count < 0);
+
+	if (entity->use_count == 0 && change < 0 && subdev)
+		v4l2_subdev_call(subdev, core, s_power, 0);
+
+	return 0;
+}
+
+/*
+ * rkisp1_pipeline_pm_power - Apply power change to all entities in a pipeline
+ * @entity: The entity
+ * @change: Use count change
+ *
+ * Walk the pipeline to update the use count and the power state of all non-node
+ * entities.
+ *
+ * Return 0 on success or a negative error code on failure.
+ */
+static int rkisp1_pipeline_pm_power(struct media_entity *entity, int change)
+{
+	struct media_entity_graph graph;
+	struct media_entity *first = entity;
+	int ret = 0;
+
+	if (!change)
+		return 0;
+
+	media_entity_graph_walk_start(&graph, entity);
+
+	while (!ret && (entity = media_entity_graph_walk_next(&graph)))
+		if (media_entity_type(entity) != MEDIA_ENT_T_DEVNODE)
+			ret = rkisp1_pipeline_pm_power_one(entity, change);
+
+	if (!ret)
+		return 0;
+
+	media_entity_graph_walk_start(&graph, first);
+
+	while ((first = media_entity_graph_walk_next(&graph)) &&
+	       first != entity)
+		if (media_entity_type(first) != MEDIA_ENT_T_DEVNODE)
+			rkisp1_pipeline_pm_power_one(first, -change);
+
+	return ret;
+}
+
+/*
+ * rkisp1_pipeline_pm_use - Update the use count of an entity
+ * @entity: The entity
+ * @use: Use (1) or stop using (0) the entity
+ *
+ * Update the use count of all entities in the pipeline and power entities on or
+ * off accordingly.
+ *
+ * Return 0 on success or a negative error code on failure. Powering entities
+ * off is assumed to never fail. No failure can occur when the use parameter is
+ * set to 0.
+ */
+static int rkisp1_pipeline_pm_use(struct media_entity *entity, int use)
+{
+	int change = use ? 1 : -1;
+	int ret;
+
+	mutex_lock(&entity->parent->graph_mutex);
+
+	/* Apply use count to node. */
+	entity->use_count += change;
+	WARN_ON(entity->use_count < 0);
+
+	/* Apply power change to connected non-nodes. */
+	ret = rkisp1_pipeline_pm_power(entity, change);
+	if (ret < 0)
+		entity->use_count -= change;
+
+	mutex_unlock(&entity->parent->graph_mutex);
+
+	return ret;
+}
+
 static void rkisp1_vb2_stop_streaming(struct vb2_queue *queue)
 {
 	struct rkisp1_capture *cap = queue->drv_priv;
@@ -972,7 +1101,7 @@ static void rkisp1_vb2_stop_streaming(struct vb2_queue *queue)
 
 	rkisp1_return_all_buffers(cap, VB2_BUF_STATE_ERROR);
 
-	ret = v4l2_pipeline_pm_use(&node->vdev.entity, 0);
+	ret = rkisp1_pipeline_pm_use(&node->vdev.entity, 0);
 	if (ret)
 		dev_err(rkisp1->dev, "pipeline close failed error:%d\n", ret);
 
@@ -1012,7 +1141,7 @@ rkisp1_vb2_start_streaming(struct vb2_queue *queue, unsigned int count)
 		dev_err(cap->rkisp1->dev, "power up failed %d\n", ret);
 		goto err_destroy_dummy;
 	}
-	ret = v4l2_pipeline_pm_use(entity, 1);
+	ret = rkisp1_pipeline_pm_use(entity, 1);
 	if (ret) {
 		dev_err(cap->rkisp1->dev, "open cif pipeline failed %d\n", ret);
 		goto err_pipe_pm_put;
@@ -1027,7 +1156,7 @@ rkisp1_vb2_start_streaming(struct vb2_queue *queue, unsigned int count)
 	return 0;
 
 err_v4l2_pm_put:
-	v4l2_pipeline_pm_use(entity, 0);
+	rkisp1_pipeline_pm_use(entity, 0);
 err_pipe_pm_put:
 	pm_runtime_put(cap->rkisp1->dev);
 err_destroy_dummy:
