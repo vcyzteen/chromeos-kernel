@@ -89,10 +89,11 @@ static const struct v4l2_file_operations rkisp1_stats_fops = {
 };
 
 static int rkisp1_stats_vb2_queue_setup(struct vb2_queue *vq,
+					const void *parg,
 					unsigned int *num_buffers,
 					unsigned int *num_planes,
 					unsigned int sizes[],
-					struct device *alloc_devs[])
+					void *alloc_ctxs[])
 {
 	*num_planes = 1;
 

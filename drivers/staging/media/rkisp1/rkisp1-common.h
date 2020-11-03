@@ -15,6 +15,7 @@
 #include <linux/mutex.h>
 #include <media/media-device.h>
 #include <media/media-entity.h>
+#include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/videobuf2-v4l2.h>
@@ -368,6 +369,7 @@ struct rkisp1_device {
 	struct media_pipeline pipe;
 	struct mutex stream_lock; /* serialize {start/stop}_streaming cb between capture devices */
 	struct rkisp1_debug debug;
+	struct vb2_alloc_ctx *alloc_ctx;
 };
 
 /*

@@ -19,6 +19,7 @@
 #include <linux/phy/phy.h>
 #include <linux/phy/phy-mipi-dphy.h>
 #include <media/v4l2-fwnode.h>
+#include <media/videobuf2-dma-contig.h>
 
 #include "rkisp1-common.h"
 
@@ -521,10 +522,17 @@ static int rkisp1_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	rkisp1->alloc_ctx = vb2_dma_contig_init_ctx(rkisp1->v4l2_dev.dev);
+	if (IS_ERR(rkisp1->alloc_ctx)) {
+		dev_err(dev, "Failed to init alloc ctx: %d\n",
+			PTR_ERR(rkisp1->alloc_ctx));
+		goto err_unreg_v4l2_dev;
+	}
+
 	ret = media_device_register(&rkisp1->media_dev);
 	if (ret) {
 		dev_err(dev, "Failed to register media device: %d\n", ret);
-		goto err_unreg_v4l2_dev;
+		goto err_alloc_ctx_cleanup;
 	}
 
 	ret = rkisp1_entities_register(rkisp1);
@@ -537,6 +545,8 @@ static int rkisp1_probe(struct platform_device *pdev)
 
 err_unreg_media_dev:
 	media_device_unregister(&rkisp1->media_dev);
+err_alloc_ctx_cleanup:
+	vb2_dma_contig_cleanup_ctx(rkisp1->alloc_ctx);
 err_unreg_v4l2_dev:
 	v4l2_device_unregister(&rkisp1->v4l2_dev);
 	pm_runtime_disable(&pdev->dev);
@@ -557,6 +567,7 @@ static int rkisp1_remove(struct platform_device *pdev)
 	rkisp1_isp_unregister(rkisp1);
 
 	media_device_unregister(&rkisp1->media_dev);
+	vb2_dma_contig_cleanup_ctx(rkisp1->alloc_ctx);
 	v4l2_device_unregister(&rkisp1->v4l2_dev);
 
 	pm_runtime_disable(&pdev->dev);

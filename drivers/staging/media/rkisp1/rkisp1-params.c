@@ -1410,10 +1410,11 @@ static const struct v4l2_ioctl_ops rkisp1_params_ioctl = {
 };
 
 static int rkisp1_params_vb2_queue_setup(struct vb2_queue *vq,
+					 const void *parg,
 					 unsigned int *num_buffers,
 					 unsigned int *num_planes,
 					 unsigned int sizes[],
-					 struct device *alloc_devs[])
+					 void *alloc_ctxs[])
 {
 	*num_buffers = clamp_t(u32, *num_buffers,
 			       RKISP1_ISP_PARAMS_REQ_BUFS_MIN,

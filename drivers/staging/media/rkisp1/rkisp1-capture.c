@@ -729,12 +729,14 @@ void rkisp1_capture_isr(struct rkisp1_device *rkisp1)
  */
 
 static int rkisp1_vb2_queue_setup(struct vb2_queue *queue,
+				  const void *parg,
 				  unsigned int *num_buffers,
 				  unsigned int *num_planes,
 				  unsigned int sizes[],
-				  struct device *alloc_devs[])
+				  void *alloc_ctxs[])
 {
 	struct rkisp1_capture *cap = queue->drv_priv;
+	struct rkisp1_device *dev = cap->rkisp1;
 	const struct v4l2_pix_format_mplane *pixm = &cap->pix.fmt;
 	unsigned int i;
 
@@ -750,6 +752,9 @@ static int rkisp1_vb2_queue_setup(struct vb2_queue *queue,
 		for (i = 0; i < pixm->num_planes; i++)
 			sizes[i] = pixm->plane_fmt[i].sizeimage;
 	}
+
+	for (i = 0; i < pixm->num_planes; i++)
+		alloc_ctxs[i] = dev->alloc_ctx;
 
 	return 0;
 }
