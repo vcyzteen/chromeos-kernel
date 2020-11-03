@@ -1011,7 +1011,6 @@ int rkisp1_isp_register(struct rkisp1_device *rkisp1)
 	v4l2_subdev_init(sd, &rkisp1_isp_ops);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 	sd->entity.ops = &rkisp1_isp_media_ops;
-	sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_PIXEL_FORMATTER;
 	sd->owner = THIS_MODULE;
 	strscpy(sd->name, RKISP1_ISP_DEV_NAME, sizeof(sd->name));
 

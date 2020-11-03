@@ -777,7 +777,6 @@ static int rkisp1_rsz_register(struct rkisp1_resizer *rsz)
 	v4l2_subdev_init(sd, &rkisp1_rsz_ops);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sd->entity.ops = &rkisp1_rsz_media_ops;
-	sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_SCALER;
 	sd->owner = THIS_MODULE;
 	strscpy(sd->name, dev_names[rsz->id], sizeof(sd->name));
 
