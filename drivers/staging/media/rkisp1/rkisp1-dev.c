@@ -136,10 +136,10 @@ static int rkisp1_create_links(struct rkisp1_device *rkisp1)
 		}
 		source_pad = ret;
 
-		ret = media_create_pad_link(&sd->entity, source_pad,
-					    &rkisp1->isp.sd.entity,
-					    RKISP1_ISP_PAD_SINK_VIDEO,
-					    flags);
+		ret = media_entity_create_link(&sd->entity, source_pad,
+					       &rkisp1->isp.sd.entity,
+					       RKISP1_ISP_PAD_SINK_VIDEO,
+					       flags);
 		if (ret)
 			return ret;
 
@@ -152,16 +152,17 @@ static int rkisp1_create_links(struct rkisp1_device *rkisp1)
 	for (i = 0; i < 2; i++) {
 		source = &rkisp1->isp.sd.entity;
 		sink = &rkisp1->resizer_devs[i].sd.entity;
-		ret = media_create_pad_link(source, RKISP1_ISP_PAD_SOURCE_VIDEO,
-					    sink, RKISP1_RSZ_PAD_SINK,
-					    MEDIA_LNK_FL_ENABLED);
+		ret = media_entity_create_link(source,
+					       RKISP1_ISP_PAD_SOURCE_VIDEO,
+					       sink, RKISP1_RSZ_PAD_SINK,
+					       MEDIA_LNK_FL_ENABLED);
 		if (ret)
 			return ret;
 
 		source = sink;
 		sink = &rkisp1->capture_devs[i].vnode.vdev.entity;
-		ret = media_create_pad_link(source, RKISP1_RSZ_PAD_SRC,
-					    sink, 0, flags);
+		ret = media_entity_create_link(source, RKISP1_RSZ_PAD_SRC,
+					       sink, 0, flags);
 		if (ret)
 			return ret;
 	}
@@ -169,15 +170,15 @@ static int rkisp1_create_links(struct rkisp1_device *rkisp1)
 	/* params links */
 	source = &rkisp1->params.vnode.vdev.entity;
 	sink = &rkisp1->isp.sd.entity;
-	ret = media_create_pad_link(source, 0, sink,
-				    RKISP1_ISP_PAD_SINK_PARAMS, flags);
+	ret = media_entity_create_link(source, 0, sink,
+				       RKISP1_ISP_PAD_SINK_PARAMS, flags);
 	if (ret)
 		return ret;
 
 	/* 3A stats links */
 	source = &rkisp1->isp.sd.entity;
 	sink = &rkisp1->stats.vnode.vdev.entity;
-	return media_create_pad_link(source, RKISP1_ISP_PAD_SOURCE_STATS,
+	return media_entity_create_link(source, RKISP1_ISP_PAD_SOURCE_STATS,
 				     sink, 0, flags);
 }
 
@@ -512,7 +513,6 @@ static int rkisp1_probe(struct platform_device *pdev)
 	rkisp1->media_dev.dev = &pdev->dev;
 	strscpy(rkisp1->media_dev.bus_info, RKISP1_BUS_INFO,
 		sizeof(rkisp1->media_dev.bus_info));
-	media_device_init(&rkisp1->media_dev);
 
 	v4l2_dev = &rkisp1->v4l2_dev;
 	v4l2_dev->mdev = &rkisp1->media_dev;

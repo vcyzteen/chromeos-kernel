@@ -1025,7 +1025,7 @@ int rkisp1_isp_register(struct rkisp1_device *rkisp1)
 	isp->src_fmt = rkisp1_isp_mbus_info_get(RKISP1_DEF_SRC_PAD_FMT);
 
 	mutex_init(&isp->ops_lock);
-	ret = media_entity_pads_init(&sd->entity, RKISP1_ISP_PAD_MAX, pads);
+	ret = media_entity_init(&sd->entity, RKISP1_ISP_PAD_MAX, pads, 0);
 	if (ret)
 		return ret;
 

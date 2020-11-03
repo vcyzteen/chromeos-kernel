@@ -897,7 +897,7 @@ static void rkisp1_cap_stream_disable(struct rkisp1_capture *cap)
  *
  * Call s_stream(false) in the reverse order from
  * rkisp1_pipeline_stream_enable() and disable the DMA engine.
- * Should be called before media_pipeline_stop()
+ * Should be called before media_entity_pipeline_stop()
  */
 static void rkisp1_pipeline_stream_disable(struct rkisp1_capture *cap)
 	__must_hold(&cap->rkisp1->stream_lock)
@@ -1120,7 +1120,7 @@ static void rkisp1_vb2_stop_streaming(struct vb2_queue *queue)
 
 	rkisp1_dummy_buf_destroy(cap);
 
-	media_pipeline_stop(&node->vdev.entity);
+	media_entity_pipeline_stop(&node->vdev.entity);
 
 	mutex_unlock(&cap->rkisp1->stream_lock);
 }
@@ -1134,7 +1134,7 @@ rkisp1_vb2_start_streaming(struct vb2_queue *queue, unsigned int count)
 
 	mutex_lock(&cap->rkisp1->stream_lock);
 
-	ret = media_pipeline_start(entity, &cap->rkisp1->pipe);
+	ret = media_entity_pipeline_start(entity, &cap->rkisp1->pipe);
 	if (ret) {
 		dev_err(cap->rkisp1->dev, "start pipeline failed %d\n", ret);
 		goto err_ret_buffers;
@@ -1171,7 +1171,7 @@ err_pipe_pm_put:
 err_destroy_dummy:
 	rkisp1_dummy_buf_destroy(cap);
 err_pipeline_stop:
-	media_pipeline_stop(entity);
+	media_entity_pipeline_stop(entity);
 err_ret_buffers:
 	rkisp1_return_all_buffers(cap, VB2_BUF_STATE_QUEUED);
 	mutex_unlock(&cap->rkisp1->stream_lock);
@@ -1506,7 +1506,7 @@ static int rkisp1_register_capture(struct rkisp1_capture *cap)
 	v4l2_info(v4l2_dev, "registered %s as /dev/video%d\n", vdev->name,
 		  vdev->num);
 
-	ret = media_entity_pads_init(&vdev->entity, 1, &node->pad);
+	ret = media_entity_init(&vdev->entity, 1, &node->pad, 0);
 	if (ret) {
 		video_unregister_device(vdev);
 		return ret;

@@ -384,7 +384,7 @@ int rkisp1_stats_register(struct rkisp1_device *rkisp1)
 	video_set_drvdata(vdev, stats);
 
 	node->pad.flags = MEDIA_PAD_FL_SINK;
-	ret = media_entity_pads_init(&vdev->entity, 1, &node->pad);
+	ret = media_entity_init(&vdev->entity, 1, &node->pad, 0);
 	if (ret)
 		goto err_release_queue;
 
