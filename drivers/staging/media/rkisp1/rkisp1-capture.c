@@ -591,17 +591,19 @@ static int rkisp1_dummy_buf_create(struct rkisp1_capture *cap)
 {
 	const struct v4l2_pix_format_mplane *pixm = &cap->pix.fmt;
 	struct rkisp1_dummy_buffer *dummy_buf = &cap->buf.dummy;
+	DEFINE_DMA_ATTRS(attrs);
 
 	dummy_buf->size = max3(rkisp1_pixfmt_comp_size(pixm, RKISP1_PLANE_Y),
 			       rkisp1_pixfmt_comp_size(pixm, RKISP1_PLANE_CB),
 			       rkisp1_pixfmt_comp_size(pixm, RKISP1_PLANE_CR));
 
 	/* The driver never access vaddr, no mapping is required */
+	dma_set_attr(DMA_ATTR_NO_KERNEL_MAPPING, &attrs);
 	dummy_buf->vaddr = dma_alloc_attrs(cap->rkisp1->dev,
 					   dummy_buf->size,
 					   &dummy_buf->dma_addr,
 					   GFP_KERNEL,
-					   DMA_ATTR_NO_KERNEL_MAPPING);
+					   &attrs);
 	if (!dummy_buf->vaddr)
 		return -ENOMEM;
 
@@ -610,9 +612,12 @@ static int rkisp1_dummy_buf_create(struct rkisp1_capture *cap)
 
 static void rkisp1_dummy_buf_destroy(struct rkisp1_capture *cap)
 {
+	DEFINE_DMA_ATTRS(attrs);
+
+	dma_set_attr(DMA_ATTR_NO_KERNEL_MAPPING, &attrs);
 	dma_free_attrs(cap->rkisp1->dev,
 		       cap->buf.dummy.size, cap->buf.dummy.vaddr,
-		       cap->buf.dummy.dma_addr, DMA_ATTR_NO_KERNEL_MAPPING);
+		       cap->buf.dummy.dma_addr, &attrs);
 }
 
 static void rkisp1_set_next_buf(struct rkisp1_capture *cap)
