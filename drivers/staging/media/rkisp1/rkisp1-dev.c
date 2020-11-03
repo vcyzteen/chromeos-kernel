@@ -250,7 +250,7 @@ static int rkisp1_subdev_notifier(struct rkisp1_device *rkisp1)
 
 	while (1) {
 		struct v4l2_fwnode_endpoint vep = {
-			.bus_type = V4L2_MBUS_CSI2_DPHY
+			.bus_type = V4L2_MBUS_CSI2
 		};
 		struct rkisp1_sensor_async *rk_asd = NULL;
 		struct fwnode_handle *ep;
