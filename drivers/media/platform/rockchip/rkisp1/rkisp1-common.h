@@ -14,6 +14,7 @@
 #include <linux/clk.h>
 #include <linux/devfreq.h>
 #include <linux/mutex.h>
+#include <linux/rkisp1-config.h>
 #include <media/media-device.h>
 #include <media/media-entity.h>
 #include <media/v4l2-common.h>
@@ -22,7 +23,6 @@
 #include <media/videobuf2-v4l2.h>
 
 #include "rkisp1-regs.h"
-#include "uapi/rkisp1-config.h"
 
 /*
  * flags on the 'direction' field in struct 'rkisp1_isp_mbus_info' that indicate
