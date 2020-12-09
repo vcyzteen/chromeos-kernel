@@ -1748,6 +1748,7 @@
 			 <&cru ACLK_ISP0_WRAPPER>,
 			 <&cru HCLK_ISP0_WRAPPER>;
 		clock-names = "isp", "aclk", "hclk";
+		devfreq = <&dmc>;
 		iommus = <&isp0_mmu>;
 		phys = <&mipi_dphy_rx0>;
 		phy-names = "dphy";

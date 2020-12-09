@@ -12,6 +12,7 @@
 #define _RKISP1_COMMON_H
 
 #include <linux/clk.h>
+#include <linux/devfreq.h>
 #include <linux/mutex.h>
 #include <media/media-device.h>
 #include <media/media-entity.h>
@@ -370,6 +371,7 @@ struct rkisp1_device {
 	struct mutex stream_lock; /* serialize {start/stop}_streaming cb between capture devices */
 	struct rkisp1_debug debug;
 	struct vb2_alloc_ctx *alloc_ctx;
+	struct devfreq *devfreq;
 };
 
 /*

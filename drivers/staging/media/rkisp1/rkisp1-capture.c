@@ -16,6 +16,7 @@
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-subdev.h>
 #include <media/videobuf2-dma-contig.h>
+#include <soc/rockchip/rk3399_dmc.h>
 
 #include "rkisp1-common.h"
 
@@ -1125,6 +1126,9 @@ static void rkisp1_vb2_stop_streaming(struct vb2_queue *queue)
 	if (ret < 0)
 		dev_err(rkisp1->dev, "power down failed error:%d\n", ret);
 
+	if (cap->rkisp1->devfreq)
+		rockchip_dmcfreq_unblock(cap->rkisp1->devfreq);
+
 	rkisp1_dummy_buf_destroy(cap);
 
 	media_entity_pipeline_stop(&node->vdev.entity);
@@ -1150,6 +1154,13 @@ rkisp1_vb2_start_streaming(struct vb2_queue *queue, unsigned int count)
 	ret = rkisp1_dummy_buf_create(cap);
 	if (ret)
 		goto err_pipeline_stop;
+
+	/*
+	 * we need to disable ddr dvfs to avoid frame drop
+	 * ddr frequency will bump up to max frequency when disable it
+	 */
+	if (cap->rkisp1->devfreq)
+		rockchip_dmcfreq_block(cap->rkisp1->devfreq);
 
 	ret = pm_runtime_get_sync(cap->rkisp1->dev);
 	if (ret < 0) {

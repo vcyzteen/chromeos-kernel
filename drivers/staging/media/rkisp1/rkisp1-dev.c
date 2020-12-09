@@ -10,6 +10,7 @@
 
 #include <linux/clk.h>
 #include <linux/debugfs.h>
+#include <linux/devfreq.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -460,6 +461,34 @@ static void rkisp1_debug_init(struct rkisp1_device *rkisp1)
 			     &debug->frame_drop[RKISP1_SELFPATH]);
 }
 
+#ifdef CONFIG_ARM_RK3399_DMC_DEVFREQ
+static int rockchip_initialize_devfreq(struct rkisp1_device *isp_dev)
+{
+	struct device *dev = isp_dev->dev;
+	struct devfreq *devfreq;
+	int ret;
+
+	devfreq = devfreq_get_devfreq_by_phandle(dev, 0);
+	if (IS_ERR(devfreq)) {
+		ret = PTR_ERR(devfreq);
+		if (ret == -ENODEV) {
+			dev_err(dev, "devfreq missing, skip\n");
+			return 0;
+		}
+		return ret;
+	}
+
+	isp_dev->devfreq = devfreq;
+
+	return 0;
+}
+#else
+static int rockchip_initialize_devfreq(struct rkisp1_device *isp_dev)
+{
+	return 0;
+}
+#endif
+
 static int rkisp1_probe(struct platform_device *pdev)
 {
 	const struct rkisp1_match_data *clk_data;
@@ -479,6 +508,12 @@ static int rkisp1_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(dev, rkisp1);
 	rkisp1->dev = dev;
+
+	ret = rockchip_initialize_devfreq(rkisp1);
+	if (ret < 0) {
+		dev_err(dev, "can not get devfreq: %d\n", ret);
+		return ret;
+	}
 
 	mutex_init(&rkisp1->stream_lock);
 
