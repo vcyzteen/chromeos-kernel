@@ -76,6 +76,7 @@ ssize_t iio_hrtimer_store_sampling_frequency(struct device *dev,
 	info->sampling_frequency[0] = integer;  /* Hz */
 	info->sampling_frequency[1] = fract * 1000;  /* uHz */
 	period = PSEC_PER_SEC;
+	do_div(period, val);
 	rem_period_ns = do_div(period, NSEC_PER_SEC);
 	info->period = ktime_set(period, rem_period_ns);
 
