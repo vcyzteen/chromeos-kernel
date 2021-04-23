@@ -3785,7 +3785,7 @@ static int niu_poll(struct napi_struct *napi, int budget)
 	work_done = niu_poll_core(np, lp, budget);
 
 	if (work_done < budget) {
-		napi_complete(napi);
+		napi_complete_done(napi, work_done);
 		niu_ldg_rearm(np, lp, 1);
 	}
 	return work_done;
@@ -3946,8 +3946,6 @@ static void niu_xmac_interrupt(struct niu *np)
 		mp->rx_frags += RXMAC_FRAG_CNT_COUNT;
 	if (val & XRXMAC_STATUS_RXMULTF_CNT_EXP)
 		mp->rx_mcasts += RXMAC_MC_FRM_CNT_COUNT;
-	if (val & XRXMAC_STATUS_RXBCAST_CNT_EXP)
-		mp->rx_bcasts += RXMAC_BC_FRM_CNT_COUNT;
 	if (val & XRXMAC_STATUS_RXBCAST_CNT_EXP)
 		mp->rx_bcasts += RXMAC_BC_FRM_CNT_COUNT;
 	if (val & XRXMAC_STATUS_RXHIST1_CNT_EXP)
