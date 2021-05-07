@@ -1325,13 +1325,85 @@ static void ath10k_htt_rx_h_csum_offload(struct sk_buff *msdu)
 	msdu->ip_summed = ath10k_htt_rx_get_csum_state(msdu);
 }
 
+static u64 ath10k_htt_rx_h_get_pn(struct ath10k *ar, struct sk_buff *skb, u16 offset,
+				  enum htt_rx_mpdu_encrypt_type enctype)
+{
+	struct ieee80211_hdr *hdr;
+	u64 pn = 0;
+	u8 *ehdr;
+
+	hdr = (struct ieee80211_hdr *)(skb->data + offset);
+	ehdr = skb->data + offset + ieee80211_hdrlen(hdr->frame_control);
+
+	if (enctype == HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2) {
+		pn = ehdr[0];
+		pn |= (u64)ehdr[1] << 8;
+		pn |= (u64)ehdr[4] << 16;
+		pn |= (u64)ehdr[5] << 24;
+		pn |= (u64)ehdr[6] << 32;
+		pn |= (u64)ehdr[7] << 40;
+	}
+	return pn;
+}
+
+static bool ath10k_htt_rx_h_frag_pn_check(struct ath10k *ar,
+					  struct sk_buff *skb,
+					  u16 peer_id,
+					  u16 offset,
+					  enum htt_rx_mpdu_encrypt_type enctype)
+{
+	struct ath10k_peer *peer;
+	union htt_rx_pn_t *last_pn, new_pn = {0};
+	struct ieee80211_hdr *hdr;
+	bool more_frags;
+	u8 tid, frag_number;
+	u32 seq;
+
+	peer = ath10k_peer_find_by_id(ar, peer_id);
+	if (!peer) {
+		ath10k_dbg(ar, ATH10K_DBG_HTT, "invalid peer for frag pn check\n");
+		goto err;
+	}
+
+	hdr = (struct ieee80211_hdr *)(skb->data + offset);
+	if (ieee80211_is_data_qos(hdr->frame_control))
+		tid = *ieee80211_get_qos_ctl(hdr) & IEEE80211_QOS_CTL_TID_MASK;
+	else
+		tid = ATH10K_TXRX_NON_QOS_TID;
+
+	last_pn = &peer->frag_tids_last_pn[tid];
+	new_pn.pn48 = ath10k_htt_rx_h_get_pn(ar, skb, offset, enctype);
+	more_frags = ieee80211_has_morefrags(hdr->frame_control);
+	frag_number = le16_to_cpu(hdr->seq_ctrl) & IEEE80211_SCTL_FRAG;
+	seq = (__le16_to_cpu(hdr->seq_ctrl) & IEEE80211_SCTL_SEQ) >> 4;
+
+	if (frag_number == 0) {
+		last_pn->pn48 = new_pn.pn48;
+		peer->frag_tids_seq[tid] = seq;
+	} else {
+		if (seq != peer->frag_tids_seq[tid])
+			goto err;
+
+		if (new_pn.pn48 != last_pn->pn48 + 1)
+			goto err;
+
+		last_pn->pn48 = new_pn.pn48;
+	}
+
+	return true;
+err:
+	return false;
+}
+
 static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 				 struct sk_buff_head *amsdu,
-				 struct ieee80211_rx_status *status)
+				 struct ieee80211_rx_status *status,
+				 u16 peer_id,
+				 bool frag)
 {
 	struct sk_buff *first;
 	struct sk_buff *last;
-	struct sk_buff *msdu;
+	struct sk_buff *msdu, *temp = NULL;
 	struct htt_rx_desc *rxd;
 	struct ieee80211_hdr *hdr;
 	enum htt_rx_mpdu_encrypt_type enctype;
@@ -1344,6 +1416,7 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	bool has_peer_idx_invalid;
 	bool is_decrypted;
 	u32 attention;
+	bool frag_pn_check = true;
 
 	if (skb_queue_empty(amsdu))
 		return;
@@ -1406,6 +1479,24 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 				RX_FLAG_MMIC_STRIPPED;
 
 	skb_queue_walk(amsdu, msdu) {
+		if (frag && is_decrypted &&
+		    enctype == HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2)
+			frag_pn_check = ath10k_htt_rx_h_frag_pn_check(ar,
+								      msdu,
+								      peer_id,
+								      0,
+								      enctype);
+
+		if (!frag_pn_check) {
+			/* Discard the fragment with invalid PN */
+			temp = msdu->prev;
+			__skb_unlink(msdu, amsdu);
+			dev_kfree_skb_any(msdu);
+			msdu = temp;
+			frag_pn_check = true;
+			continue;
+		}
+
 		ath10k_htt_rx_h_csum_offload(msdu);
 		ath10k_htt_rx_h_undecap(ar, msdu, status, first_hdr, enctype,
 					is_decrypted);
@@ -1620,7 +1711,7 @@ static void ath10k_htt_rx_handler(struct ath10k_htt *htt,
 		ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
 		ath10k_htt_rx_h_unchain(ar, &amsdu, ret > 0);
 		ath10k_htt_rx_h_filter(ar, &amsdu, rx_status);
-		ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status);
+		ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status, 0 , 0);
 		ath10k_htt_rx_h_deliver(ar, &amsdu, rx_status);
 	}
 
@@ -1666,7 +1757,7 @@ static void ath10k_htt_rx_frag_handler(struct ath10k_htt *htt,
 
 	ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
 	ath10k_htt_rx_h_filter(ar, &amsdu, rx_status);
-	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status);
+	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status, 0, true);
 	ath10k_htt_rx_h_deliver(ar, &amsdu, rx_status);
 
 	if (fw_desc_len > 0) {
@@ -1965,7 +2056,7 @@ static void ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 			 */
 			ath10k_htt_rx_h_ppdu(ar, &amsdu, status, vdev_id);
 			ath10k_htt_rx_h_filter(ar, &amsdu, status);
-			ath10k_htt_rx_h_mpdu(ar, &amsdu, status);
+			ath10k_htt_rx_h_mpdu(ar, &amsdu, status, peer_id, frag);
 			ath10k_htt_rx_h_deliver(ar, &amsdu, status);
 			break;
 		case -EAGAIN:
