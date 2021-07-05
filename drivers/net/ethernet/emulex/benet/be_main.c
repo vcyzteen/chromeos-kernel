@@ -3114,7 +3114,7 @@ int be_poll(struct napi_struct *napi, int budget)
 		be_process_mcc(adapter);
 
 	if (max_work < budget) {
-		napi_complete(napi);
+		napi_complete_done(napi, max_work);
 
 		/* Skyhawk EQ_DB has a provision to set the rearm to interrupt
 		 * delay via a delay multiplier encoding value
@@ -5878,6 +5878,7 @@ drv_cleanup:
 unmap_bars:
 	be_unmap_pci_bars(adapter);
 free_netdev:
+	pci_disable_pcie_error_reporting(pdev);
 	free_netdev(netdev);
 rel_reg:
 	pci_release_regions(pdev);
