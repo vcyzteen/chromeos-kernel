@@ -291,8 +291,8 @@ static struct rockchip_vpu_control controls[] = {
 		.default_value = 1,
 	},
 	{
-		.id = V4L2_CID_MPEG_VIDEO_H264_SPS_PPS_BEFORE_IDR,
-		.type = V4L2_CTRL_TYPE_BOOLEAN,
+		.id = V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR,
+		.type = V4L2_CTRL_TYPE_INTEGER,
 		.minimum = 0,
 		.maximum = 1,
 		.step = 1,
@@ -895,7 +895,7 @@ static int rockchip_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MPEG_MFC51_VIDEO_RC_FIXED_TARGET_BIT:
 	case V4L2_CID_MPEG_VIDEO_B_FRAMES:
 	case V4L2_CID_MPEG_VIDEO_H264_B_FRAME_QP:
-	case V4L2_CID_MPEG_VIDEO_H264_SPS_PPS_BEFORE_IDR:
+	case V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR:
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		/* Ignore these controls for now. (FIXME?) */
 		break;
@@ -931,6 +931,9 @@ static int rockchip_vpu_enc_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_PRIVATE_ROCKCHIP_RET_PARAMS:
+		/* Encoder not initialized yet. */
+		if (!ctx->run.priv_dst.cpu)
+			return -EIO;
 		memcpy(ctrl->p_new.p, ctx->run.priv_dst.cpu,
 			ROCKCHIP_RET_PARAMS_SIZE);
 		break;
@@ -1203,6 +1206,10 @@ static int rockchip_vpu_queue_setup(struct vb2_queue *vq,
 		vpu_err("invalid queue type: %d\n", vq->type);
 		ret = -EINVAL;
 	}
+
+	for (i = 0; i < *plane_count; ++i)
+		if (!psize[i])
+			ret = -EINVAL;
 
 	vpu_debug_leave();
 
