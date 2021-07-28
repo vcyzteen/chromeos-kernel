@@ -581,6 +581,9 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 			     (1 << KVM_FEATURE_ASYNC_PF) |
 			     (1 << KVM_FEATURE_PV_EOI) |
 			     (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT) |
+#ifdef CONFIG_KVM_HETEROGENEOUS_RT
+			     (1 << KVM_FEATURE_PREEMPT_COUNT) |
+#endif
 			     (1 << KVM_FEATURE_PV_UNHALT);
 
 		if (sched_info_on())
